@@ -1,0 +1,96 @@
+{
+  "info": {
+    "name": "fintech-fineract-assessment",
+    "description": "Phase 0 baseline checks against the customized Fineract container (unmodified pinned tag 1.10.0 until Part A lands). Uses the default seeded tenant + super-user.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "basic",
+    "basic": [
+      { "key": "username", "value": "{{fineractUser}}", "type": "string" },
+      { "key": "password", "value": "{{fineractPassword}}", "type": "string" }
+    ]
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "https://localhost:8443/fineract-provider" },
+    { "key": "tenantId", "value": "default" },
+    { "key": "fineractUser", "value": "mifos" },
+    { "key": "fineractPassword", "value": "password" }
+  ],
+  "item": [
+    {
+      "name": "Actuator",
+      "item": [
+        {
+          "name": "Health (no auth)",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/actuator/health",
+            "auth": { "type": "noauth" }
+          }
+        },
+        {
+          "name": "Info (no auth)",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/actuator/info",
+            "auth": { "type": "noauth" }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Baseline API checks",
+      "item": [
+        {
+          "name": "List Offices",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Fineract-Platform-TenantId", "value": "{{tenantId}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/offices",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "offices"]
+            }
+          }
+        },
+        {
+          "name": "List GL Accounts (empty until Part A)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Fineract-Platform-TenantId", "value": "{{tenantId}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/glaccounts",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "glaccounts"]
+            }
+          }
+        },
+        {
+          "name": "List Currencies",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Fineract-Platform-TenantId", "value": "{{tenantId}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/currencies",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "currencies"]
+            }
+          }
+        },
+        {
+          "name": "List Clients (empty)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Fineract-Platform-TenantId", "value": "{{tenantId}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/clients",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "clients"]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

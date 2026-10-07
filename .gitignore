@@ -5,6 +5,14 @@ build/
 *.jar
 *.war
 
+# Guard against ever vendoring the upstream Fineract source into the repo --
+# the whole point of fineract-customization/ is a small patch/diff, not a
+# full checkout. If a local scratch clone (see NOTES.md's patch-generation
+# steps) ever ends up inside the repo by mistake instead of /tmp, this keeps
+# it from being committed.
+fineract-customization/fineract-src/
+fineract-customization/*-upstream/
+
 # Python environments & cache
 __pycache__/
 *.pyc
@@ -12,6 +20,11 @@ __pycache__/
 venv/
 .pytest_cache/
 .mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.egg-info/
+dist/
 
 # IDE files and OS configurations
 .idea/
@@ -21,7 +34,24 @@ venv/
 *.njsproj
 *.sln
 .DS_Store
+Thumbs.db
+desktop.ini
+*.iml
+
+# Editor/OS scratch files
+*.tmp
+*.bak
+*.swp
+*~
+
+# Docker
+docker-compose.override.yml
 
 # Local application secrets / dynamic environments
 .env
+.env.local
 fineract/configuration/local-properties.env
+
+# Ad-hoc logs -- but evidence/ logs are required deliverables, never ignore those
+*.log
+!evidence/**

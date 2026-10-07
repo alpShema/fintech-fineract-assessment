@@ -1,0 +1,25 @@
+// fineract-customization/gradle-init.gradle
+//
+// Workaround for a dead upstream transitive dependency, NOT part of our
+// Part A patch. Apache Fineract's 1.10.0 tag's root build.gradle declares a
+// buildscript classpath dependency on the Asciidoctor docs plugin chain
+// (org.asciidoctor.jvm.gems -> jruby-gradle-core-plugin -> http-builder-ng-okhttp)
+// which transitively pulls in com.burgstaller:okhttp-digest:1.10. That
+// artifact's group was retired when JCenter shut down in 2022 and the
+// project relocated to io.github.rburgst:okhttp-digest -- so even a stock,
+// unmodified build of this exact tag fails identically right now with
+// "Could not find com.burgstaller:okhttp-digest:1.10" during root project
+// configuration (before any task even runs, since buildscript classpaths
+// resolve for the whole multi-project build up front).
+//
+// This substitutes the dead coordinate for its live successor at resolution
+// time, for every project's buildscript classpath. We never touch
+// fineract's own build.gradle to do this, so it stays an unmodified
+// baseline build (fineract.patch is still untouched by this).
+allprojects { proj ->
+    proj.buildscript.configurations.all {
+        resolutionStrategy.dependencySubstitution {
+            substitute module('com.burgstaller:okhttp-digest') using module('io.github.rburgst:okhttp-digest:1.21')
+        }
+    }
+}

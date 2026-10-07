@@ -1,82 +1,50 @@
-version: '3.8'
-
-networks:
-  fintech-network:
-    driver: bridge
-
-volumes:
-  postgres_data:
-    driver: local
+# fintech-fineract-assessment — docker-compose.yml
+#
+# Phase 0 scope: Postgres + the customized-Fineract build pipeline, proven
+# end to end before any Part A Java changes land (fineract.patch is
+# currently empty, so this builds the *unmodified* pinned 1.10.0 tag).
+#
+# integration-service and mock-erp are scaffolded (see their directories)
+# but not wired in here yet -- added once they have something to run.
 
 services:
-  # Shared Ledger and Operations Database
   db:
-    image: postgres:15-alpine
-    container_name: fintech-db
-    environment:
-      POSTGRES_USER: fineract
-      POSTGRES_PASSWORD: fineract_password
-      POSTGRES_DB: fineract_db
+    image: postgres:16.1
+    restart: always
+    env_file:
+      - ./fineract/env/postgresql.env
+    volumes:
+      - ./fineract/postgresql-init/01-init.sh:/docker-entrypoint-initdb.d/01-init.sh:ro
+      - fineract-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-q", "-d", "postgres", "-U", "root"]
+      timeout: 10s
+      retries: 10
     ports:
       - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    networks:
-      - fintech-network
-    healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U fineract -d fineract_db" ]
-      interval: 5s
-      timeout: 5s
-      retries: 5
 
-  # Apache Fineract - Custom Java/Spring Boot App Tier
-  fineract-core:
+  fineract:
     build:
       context: ./fineract-customization
-      dockerfile: Dockerfile
-    container_name: fineract-core
-    ports:
-      - "8443:8443"
-    environment:
-      - FINERACT_DEFAULT_TENANTDB_HOSTNAME=db
-      - FINERACT_DEFAULT_TENANTDB_PORT=5432
-      - FINERACT_DEFAULT_TENANTDB_USERNAME=fineract
-      - FINERACT_DEFAULT_TENANTDB_PASSWORD=fineract_password
-      - FINERACT_DEFAULT_TENANTDB_CONN_PARAMS=useSSL=false
+      args:
+        FINERACT_TAG: "1.10.0"
+    image: fintech-fineract-assessment/fineract-custom:1.10.0
+    restart: always
     depends_on:
       db:
         condition: service_healthy
-    networks:
-      - fintech-network
-
-  # Integration Service - Python Middleman
-  integration-service:
-    build:
-      context: ./integration-service
-      dockerfile: Dockerfile
-    container_name: integration-service
+    env_file:
+      - ./fineract/env/fineract.env
+      - ./fineract/env/fineract-common.env
+      - ./fineract/env/fineract-postgresql.env
     ports:
-      - "8000:8000"
-    environment:
-      - DATABASE_URL=postgresql://fineract:fineract_password@db:5432/fineract_db
-      - FINERACT_BASE_URL=https://fineract-core:8443/fineract-provider/api/v1
-    depends_on:
-      - db
-      - fineract-core
-    networks:
-      - fintech-network
+      - "8443:8443"
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "sh", "-c", "nc -z localhost 8443"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
 
-  # Mock ERP - Python Chart of Accounts Master
-  mock-erp:
-    build:
-      context: ./mock-erp
-      dockerfile: Dockerfile
-    container_name: mock-erp
-    ports:
-      - "8001:8001"
-    environment:
-      - DATABASE_URL=postgresql://fineract:fineract_password@db:5432/fineract_db
-    depends_on:
-      - db
-    networks:
-      - fintech-network
+volumes:
+  fineract-db-data:
