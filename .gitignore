@@ -1,0 +1,27 @@
+# Java & Gradle patterns
+.gradle/
+build/
+*.class
+*.jar
+*.war
+
+# Python environments & cache
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+
+# IDE files and OS configurations
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+.DS_Store
+
+# Local application secrets / dynamic environments
+.env
+fineract/configuration/local-properties.env

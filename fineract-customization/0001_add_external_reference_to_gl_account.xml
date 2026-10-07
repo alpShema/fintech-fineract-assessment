@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.1.xsd">
+
+    <changeSet id="add_external_reference_to_gl_account_001" author="alphonse_shema">
+        <comment>Adding unique external_reference to acc_gl_account to mirror ERP chart of accounts</comment>
+
+        <!-- 1. Add the column to the existing general ledger table -->
+        <addColumn tableName="acc_gl_account">
+            <column name="external_reference" type="VARCHAR(100)">
+                <constraints nullable="true" />
+            </column>
+        </addColumn>
+
+        <!-- 2. Enforce structural uniqueness across the ledger mapping -->
+        <addUniqueConstraint
+                columnNames="external_reference"
+                constraintName="uq_acc_gl_account_external_reference"
+                tableName="acc_gl_account" />
+    </changeSet>
+</databaseChangeLog>
