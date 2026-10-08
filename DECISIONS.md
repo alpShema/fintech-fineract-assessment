@@ -211,3 +211,44 @@ default of 5,000,000 (matching the brief's own suggested Part D loan amount), st
 `mifos-standard-strategy` transaction processing order (penalties/fees/interest/
 principal — not actually exercised since fees/penalties are out of scope, but it's
 Fineract's own default and changing it wasn't warranted).
+
+## Part C — Identities, Part D — Loan lifecycle
+
+Demonstrated directly against Fineract (not yet through the Integration Service, which
+doesn't exist as code yet) to prove the underlying mechanism before building a service
+on top of it. `scripts/demo-part-c-d.sh` is the reproducible version; `evidence/part-c-d-demo.log`
+is a captured run.
+
+### `client_uid` / `loan_reference` → Fineract's `externalId`, not a custom field
+
+No custom field needed on either side: Fineract's `Client` and `Loan` entities already
+have a native `externalId`, and — found while exploring the source rather than
+guessing — both already expose dedicated lookup-by-external-id endpoints out of the
+box: `GET /clients/external-id/{externalId}` and `GET /loans/external-id/{externalId}`.
+No Fineract internal numeric ID ever needs to appear in a request or response a caller
+constructs around `client_uid`/`loan_reference` — confirmed concretely: the loan
+lookup response includes `clientExternalId` (the client's own business ID) directly,
+not the client's internal numeric ID, so the two business identifiers chain together
+without Fineract's internal IDs ever surfacing.
+
+### Client legal form: Person, not Entity
+
+The business scenario is SME asset financing, so the "real" client is arguably a
+business entity, not an individual. Fineract's `legalFormId=2` (Entity) requires
+additional fields (constitution, main business line) that add complexity without
+changing anything about what Part C/D are actually testing (the externalId mechanism
+and the loan lifecycle state machine). Used `legalFormId=1` (Person) instead, modeling
+the SME as its owner/representative — a common simplification in microfinance systems
+modeling small businesses as individual borrowers. Documented here as a deliberate
+scope choice, not an oversight.
+
+### Loan lifecycle: reached Closed (obligations met) exactly as required
+
+5,000,000 RWF, 18% p.a., 12 monthly installments (~458,400/month) → 3 partial
+repayments of one installment each → one final lump-sum repayment for whatever the
+*actual remaining balance* is at that point (queried live via `summary.totalOutstanding`
+immediately before the final transaction, not a fixed assumed number) → `Closed
+(obligations met)`, `principalOutstanding: 0`, `totalOutstanding: 0`. Fetching the live
+balance right before the final payment (rather than hardcoding "pay off whatever's
+left") matters because the exact remaining balance depends on the real amortization
+schedule's principal/interest split per period, not a simple division of the total.

@@ -1,0 +1,45 @@
+Part C + D demo -- client_uid=SME-DEMO-1791456529, loan_reference=LN-DEMO-1791456529
+----------------------------------------------------------------------
+=== PART C: Client identity ===
+STEP 1: initial state -- no client exists yet with client_uid='SME-DEMO-1791456529'
+STEP 2: request -- create client, storing client_uid as Fineract's externalId
+STEP 3: response -- {"officeId":2,"clientId":2,"resourceId":2,"resourceExternalId":"SME-DEMO-1791456529"}
+STEP 2b: request -- find by client_uid (GET /clients/external-id/{client_uid}), not Fineract's internal id
+STEP 3b: response -- status=Active, displayName=Amina Uwase
+STEP 7: expected result -- exists, status=Active, displayName='Amina Uwase'
+STEP 8: actual result -- status=Active, displayName=Amina Uwase
+  EXPLANATION: PASS -- client found by client_uid alone, active, correct name
+----------------------------------------------------------------------
+=== PART D: Loan lifecycle ===
+STEP 1: initial state -- client 'SME-DEMO-1791456529' active, no loans yet
+STEP 2: request -- loan application (5,000,000 RWF, 18% p.a., 12 monthly repayments)
+STEP 3: response -- {"officeId":2,"clientId":2,"loanId":2,"resourceId":2,"resourceExternalId":"LN-DEMO-1791456529"}
+STEP 4: Fineract state -- status=Submitted and pending approval
+----------------------------------------------------------------------
+STEP 2: request -- approve (command=approve)
+STEP 4: Fineract state -- status=Approved
+----------------------------------------------------------------------
+STEP 2: request -- disburse (command=disburse)
+STEP 4: Fineract state -- status=Active, principalOutstanding=5000000.0
+----------------------------------------------------------------------
+=== 3 partial repayments ===
+STEP 2: request -- repayment 1 of 458400 RWF on 15 February 2026
+STEP 4: Fineract state -- totalOutstanding=5042399.0
+STEP 2: request -- repayment 2 of 458400 RWF on 15 March 2026
+STEP 4: Fineract state -- totalOutstanding=4583999.0
+STEP 2: request -- repayment 3 of 458400 RWF on 15 April 2026
+STEP 4: Fineract state -- totalOutstanding=4125599.0
+----------------------------------------------------------------------
+=== Final payoff ===
+STEP 2: request -- final repayment of remaining balance (4125599.0 RWF) on 20 April 2026
+STEP 3/4: Fineract state -- status=Closed (obligations met), principalOutstanding=0.0, totalOutstanding=0.0
+STEP 7: expected result -- status=Closed (obligations met), outstanding=0
+STEP 8: actual result -- status=Closed (obligations met), principalOutstanding=0.0, totalOutstanding=0.0
+  EXPLANATION: PASS -- full loan lifecycle reached Closed (obligations met), zero outstanding
+----------------------------------------------------------------------
+=== Lookup by loan_reference (not Fineract's internal loan id) ===
+externalId (loan_reference): LN-DEMO-1791456529
+clientExternalId (client_uid): SME-DEMO-1791456529
+status: Closed (obligations met)
+----------------------------------------------------------------------
+PART C + D COMPLETE for client_uid=SME-DEMO-1791456529, loan_reference=LN-DEMO-1791456529

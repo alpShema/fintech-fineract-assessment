@@ -19,7 +19,11 @@
     { "key": "glExternalRef", "value": "GL-TEST-1200" },
     { "key": "integrationServiceUser", "value": "integration-service" },
     { "key": "integrationServicePassword", "value": "IntegrationService!2024" },
-    { "key": "integrationRoleId", "value": "3" }
+    { "key": "integrationRoleId", "value": "3" },
+    { "key": "clientUid", "value": "SME-POSTMAN-001" },
+    { "key": "loanReference", "value": "LN-POSTMAN-001" },
+    { "key": "clientId", "value": "" },
+    { "key": "loanId", "value": "" }
   ],
   "item": [
     {
@@ -233,6 +237,227 @@
                 { "key": "username", "value": "{{integrationServiceUser}}", "type": "string" },
                 { "key": "password", "value": "{{integrationServicePassword}}", "type": "string" }
               ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Part C+D - Identities and Loan Lifecycle",
+      "description": "Run in order. Each create step auto-captures its id into a collection variable (clientId, loanId) so later steps don't need manual copy-paste. Change {{clientUid}}/{{loanReference}} first if you want a fresh run instead of re-using a previous one.",
+      "item": [
+        {
+          "name": "1. Create Client (client_uid as externalId)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.resourceId) { pm.collectionVariables.set('clientId', json.resourceId); }"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Fineract-Platform-TenantId", "value": "{{tenantId}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": { "raw": "{{baseUrl}}/api/v1/clients", "host": ["{{baseUrl}}"], "path": ["api", "v1", "clients"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"officeId\": 2,\n  \"firstname\": \"Amina\",\n  \"lastname\": \"Uwase\",\n  \"externalId\": \"{{clientUid}}\",\n  \"legalFormId\": 1,\n  \"active\": true,\n  \"activationDate\": \"01 January 2026\",\n  \"dateFormat\": \"dd MMMM yyyy\",\n  \"locale\": \"en\"\n}"
+            }
+          }
+        },
+        {
+          "name": "2. Find Client by client_uid (expect Active, correct name)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Fineract-Platform-TenantId", "value": "{{tenantId}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/clients/external-id/{{clientUid}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "clients", "external-id", "{{clientUid}}"]
+            }
+          }
+        },
+        {
+          "name": "3. Create Loan Application (loan_reference as externalId)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.resourceId) { pm.collectionVariables.set('loanId', json.resourceId); }"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Fineract-Platform-TenantId", "value": "{{tenantId}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": { "raw": "{{baseUrl}}/api/v1/loans", "host": ["{{baseUrl}}"], "path": ["api", "v1", "loans"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"clientId\": {{clientId}},\n  \"productId\": 1,\n  \"loanType\": \"individual\",\n  \"principal\": 5000000,\n  \"loanTermFrequency\": 12,\n  \"loanTermFrequencyType\": 2,\n  \"numberOfRepayments\": 12,\n  \"repaymentEvery\": 1,\n  \"repaymentFrequencyType\": 2,\n  \"interestRatePerPeriod\": 18,\n  \"interestType\": 0,\n  \"amortizationType\": 1,\n  \"interestCalculationPeriodType\": 1,\n  \"transactionProcessingStrategyCode\": \"mifos-standard-strategy\",\n  \"expectedDisbursementDate\": \"15 January 2026\",\n  \"submittedOnDate\": \"15 January 2026\",\n  \"externalId\": \"{{loanReference}}\",\n  \"dateFormat\": \"dd MMMM yyyy\",\n  \"locale\": \"en\"\n}"
+            }
+          }
+        },
+        {
+          "name": "4. Approve Loan",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Fineract-Platform-TenantId", "value": "{{tenantId}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/loans/{{loanId}}?command=approve",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "loans", "{{loanId}}"],
+              "query": [{ "key": "command", "value": "approve" }]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"approvedOnDate\": \"15 January 2026\",\n  \"expectedDisbursementDate\": \"15 January 2026\",\n  \"dateFormat\": \"dd MMMM yyyy\",\n  \"locale\": \"en\"\n}"
+            }
+          }
+        },
+        {
+          "name": "5. Disburse Loan",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Fineract-Platform-TenantId", "value": "{{tenantId}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/loans/{{loanId}}?command=disburse",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "loans", "{{loanId}}"],
+              "query": [{ "key": "command", "value": "disburse" }]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"actualDisbursementDate\": \"15 January 2026\",\n  \"dateFormat\": \"dd MMMM yyyy\",\n  \"locale\": \"en\"\n}"
+            }
+          }
+        },
+        {
+          "name": "6. Repayment 1 of 3 (458400 RWF)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Fineract-Platform-TenantId", "value": "{{tenantId}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/loans/{{loanId}}/transactions?command=repayment",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "loans", "{{loanId}}", "transactions"],
+              "query": [{ "key": "command", "value": "repayment" }]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transactionDate\": \"15 February 2026\",\n  \"transactionAmount\": 458400,\n  \"dateFormat\": \"dd MMMM yyyy\",\n  \"locale\": \"en\"\n}"
+            }
+          }
+        },
+        {
+          "name": "7. Repayment 2 of 3 (458400 RWF)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Fineract-Platform-TenantId", "value": "{{tenantId}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/loans/{{loanId}}/transactions?command=repayment",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "loans", "{{loanId}}", "transactions"],
+              "query": [{ "key": "command", "value": "repayment" }]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transactionDate\": \"15 March 2026\",\n  \"transactionAmount\": 458400,\n  \"dateFormat\": \"dd MMMM yyyy\",\n  \"locale\": \"en\"\n}"
+            }
+          }
+        },
+        {
+          "name": "8. Repayment 3 of 3 (458400 RWF)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Fineract-Platform-TenantId", "value": "{{tenantId}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/loans/{{loanId}}/transactions?command=repayment",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "loans", "{{loanId}}", "transactions"],
+              "query": [{ "key": "command", "value": "repayment" }]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transactionDate\": \"15 April 2026\",\n  \"transactionAmount\": 458400,\n  \"dateFormat\": \"dd MMMM yyyy\",\n  \"locale\": \"en\"\n}"
+            }
+          }
+        },
+        {
+          "name": "9. Check Balance (auto-captures payoff amount)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "pm.collectionVariables.set('finalPayoffAmount', json.summary.totalOutstanding);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Fineract-Platform-TenantId", "value": "{{tenantId}}" }],
+            "url": { "raw": "{{baseUrl}}/api/v1/loans/{{loanId}}", "host": ["{{baseUrl}}"], "path": ["api", "v1", "loans", "{{loanId}}"] }
+          }
+        },
+        {
+          "name": "10. Final Payoff (expect status -> Closed (obligations met))",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Fineract-Platform-TenantId", "value": "{{tenantId}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/loans/{{loanId}}/transactions?command=repayment",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "loans", "{{loanId}}", "transactions"],
+              "query": [{ "key": "command", "value": "repayment" }]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transactionDate\": \"20 April 2026\",\n  \"transactionAmount\": {{finalPayoffAmount}},\n  \"dateFormat\": \"dd MMMM yyyy\",\n  \"locale\": \"en\"\n}"
+            }
+          }
+        },
+        {
+          "name": "11. Find Loan by loan_reference (expect Closed, chains to client_uid)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Fineract-Platform-TenantId", "value": "{{tenantId}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/loans/external-id/{{loanReference}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "loans", "external-id", "{{loanReference}}"]
             }
           }
         }
