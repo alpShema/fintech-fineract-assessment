@@ -252,3 +252,69 @@ immediately before the final transaction, not a fixed assumed number) → `Close
 balance right before the final payment (rather than hardcoding "pay off whatever's
 left") matters because the exact remaining balance depends on the real amortization
 schedule's principal/interest split per period, not a simple division of the total.
+
+## Part G — Mock ERP (Python)
+
+### Stack: FastAPI + SQLAlchemy 2.0 (typed) + Pydantic v2 + Postgres, no migration tool
+
+Matches the Python-side default established before building started. One deliberate
+deviation from a typical production setup: **no Alembic** (or other migration tool).
+The schema is small, stable, and this is a mock service for an assessment, not a
+system undergoing repeated schema evolution — `Base.metadata.create_all()` (idempotent,
+skips existing tables) at startup keeps setup scripted/repeatable without the added
+machinery a migration tool brings for marginal benefit here. Fineract's Liquibase
+requirement is different in kind: that's a mandated requirement for *Fineract's own*
+schema changes (Part A), not a blanket requirement for every Python component's
+database.
+
+### Chart of accounts seeded with the same codes/references already in Fineract
+
+Seeded accounts (1100 Bank, 1200 Loan Receivable, 4000 Interest Income) use the exact
+same `code` and `external_reference` values (`GL-1100`/`GL-1200`/`GL-4000`) as the GL
+accounts already created in Fineract during Part B's setup. This isn't a coincidence to
+maintain manually — it's the point: when the Integration Service's GL sync (Part A's
+Python side) runs against this same chart of accounts, it will find Fineract's accounts
+already there via the idempotent-return path (behavior 2 from Part A), not create
+duplicates. One chart of accounts the whole system agrees on, not two that happen to
+look similar.
+
+### Idempotency: same pattern as Fineract's Part A, deliberately
+
+Both `POST /api/accounts` and `POST /api/journal-entries` follow the identical
+decision structure built in Java for GL accounts: new reference → create; same
+reference + identical payload → return existing (200); same reference + different
+payload → 409. The equality check (`_same_payload`) is explicit field-by-field
+comparison, not a generic diff/mutate helper — same reasoning as Fineract's
+`isSamePayload()`: a read-only check should only read.
+
+**Bug found and fixed while building this**: the DB-constraint-violation fallback
+(the last line of defense for the same create-check-then-insert race Part A's
+`DECISIONS.md` describes) originally parsed `exc.orig`'s message string to figure out
+*which* unique constraint fired (`"accounts_code_key" in message`). That's
+Postgres-specific constraint-naming convention — SQLite (used for the fast, Docker-free
+unit tests) formats the same error completely differently
+(`"UNIQUE constraint failed: accounts.code"`, no constraint name at all), so the
+string-matching silently failed under SQLite and a real conflict fell through as an
+uncaught 500 instead of the intended 409. Caught by the test suite itself (one test
+failed) before this ever reached a running container. Fixed by **re-querying** for what
+actually collided instead of parsing the exception message — dialect-agnostic, works
+identically against SQLite and Postgres.
+
+### Balance sign convention is accounting-correct, not a raw debit-minus-credit
+
+`GET /api/accounts/{code}/balance` returns a balance signed according to each
+account's real normal-balance side: asset/expense accounts report `debit - credit`
+(they increase on the debit side); liability/equity/income accounts report
+`credit - debit`. Verified concretely: after a 5,000,000 RWF disbursement entry (DR
+Loan Receivable / CR Bank), Loan Receivable reports `+5,000,000` and Bank reports
+`-5,000,000` — not both positive, which a naive "always debit minus credit" calculation
+would have produced for Loan Receivable but gotten backwards for Bank.
+
+### Testing: SQLite in-memory for unit tests, real Postgres for the Docker demo
+
+Unit tests (`tests/`) run against an in-memory SQLite database (fast, no Docker
+dependency, fresh schema per test via `StaticPool`). The actual running container
+(`scripts/demo-part-g.sh`) exercises the real Postgres path end to end. Both passed
+independently — the SQLite-vs-Postgres dialect difference is exactly what the
+bug above was about, so running the unit suite alone wouldn't have been sufficient
+proof that the conflict-detection logic is actually correct against the real database.

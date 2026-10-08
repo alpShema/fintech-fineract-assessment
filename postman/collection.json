@@ -23,7 +23,9 @@
     { "key": "clientUid", "value": "SME-POSTMAN-001" },
     { "key": "loanReference", "value": "LN-POSTMAN-001" },
     { "key": "clientId", "value": "" },
-    { "key": "loanId", "value": "" }
+    { "key": "loanId", "value": "" },
+    { "key": "mockErpBaseUrl", "value": "http://localhost:8001" },
+    { "key": "txnExternalRef", "value": "TXN-POSTMAN-001" }
   ],
   "item": [
     {
@@ -458,6 +460,144 @@
               "raw": "{{baseUrl}}/api/v1/loans/external-id/{{loanReference}}",
               "host": ["{{baseUrl}}"],
               "path": ["api", "v1", "loans", "external-id", "{{loanReference}}"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Part G - Mock ERP",
+      "description": "Mock ERP runs on a separate base URL ({{mockErpBaseUrl}}) with no authentication (unlike Fineract). Seeded chart of accounts (1100 Bank, 1200 Loan Receivable, 4000 Interest Income) matches Fineract's Part B GL accounts exactly, same codes and external_reference values.",
+      "auth": { "type": "noauth" },
+      "item": [
+        {
+          "name": "0. Health Check",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{mockErpBaseUrl}}/health", "host": ["{{mockErpBaseUrl}}"], "path": ["health"] }
+          }
+        },
+        {
+          "name": "1. List Accounts (expect seeded 1100/1200/4000)",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{mockErpBaseUrl}}/api/accounts", "host": ["{{mockErpBaseUrl}}"], "path": ["api", "accounts"] }
+          }
+        },
+        {
+          "name": "2. Create Account (new external_reference)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{mockErpBaseUrl}}/api/accounts", "host": ["{{mockErpBaseUrl}}"], "path": ["api", "accounts"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"5000\",\n  \"name\": \"Loan Losses Written Off\",\n  \"type\": \"EXPENSE\",\n  \"currency\": \"RWF\",\n  \"external_reference\": \"GL-5000-DEMO\"\n}"
+            }
+          }
+        },
+        {
+          "name": "3. Resend IDENTICAL payload (expect 200, same id)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{mockErpBaseUrl}}/api/accounts", "host": ["{{mockErpBaseUrl}}"], "path": ["api", "accounts"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"5000\",\n  \"name\": \"Loan Losses Written Off\",\n  \"type\": \"EXPENSE\",\n  \"currency\": \"RWF\",\n  \"external_reference\": \"GL-5000-DEMO\"\n}"
+            }
+          }
+        },
+        {
+          "name": "4. Resend SAME reference, DIFFERENT payload (expect 409)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{mockErpBaseUrl}}/api/accounts", "host": ["{{mockErpBaseUrl}}"], "path": ["api", "accounts"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"5000-X\",\n  \"name\": \"Renamed\",\n  \"type\": \"EXPENSE\",\n  \"currency\": \"RWF\",\n  \"external_reference\": \"GL-5000-DEMO\"\n}"
+            }
+          }
+        },
+        {
+          "name": "5. Create Journal Entry (balanced: disbursement)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{mockErpBaseUrl}}/api/journal-entries", "host": ["{{mockErpBaseUrl}}"], "path": ["api", "journal-entries"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"external_reference\": \"{{txnExternalRef}}\",\n  \"entry_date\": \"2026-01-15\",\n  \"description\": \"demo disbursement\",\n  \"lines\": [\n    {\"account_code\": \"1200\", \"debit\": \"5000000.00\"},\n    {\"account_code\": \"1100\", \"credit\": \"5000000.00\"}\n  ]\n}"
+            }
+          }
+        },
+        {
+          "name": "6. Resend IDENTICAL entry (expect 200, same id)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{mockErpBaseUrl}}/api/journal-entries", "host": ["{{mockErpBaseUrl}}"], "path": ["api", "journal-entries"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"external_reference\": \"{{txnExternalRef}}\",\n  \"entry_date\": \"2026-01-15\",\n  \"description\": \"demo disbursement\",\n  \"lines\": [\n    {\"account_code\": \"1200\", \"debit\": \"5000000.00\"},\n    {\"account_code\": \"1100\", \"credit\": \"5000000.00\"}\n  ]\n}"
+            }
+          }
+        },
+        {
+          "name": "7. Same reference, UNBALANCED different payload (expect 409)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{mockErpBaseUrl}}/api/journal-entries", "host": ["{{mockErpBaseUrl}}"], "path": ["api", "journal-entries"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"external_reference\": \"{{txnExternalRef}}\",\n  \"entry_date\": \"2026-01-15\",\n  \"description\": \"CHANGED\",\n  \"lines\": [\n    {\"account_code\": \"1200\", \"debit\": \"1000000.00\"},\n    {\"account_code\": \"1100\", \"credit\": \"1000000.00\"}\n  ]\n}"
+            }
+          }
+        },
+        {
+          "name": "8. Entry that does NOT balance (expect 422)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{mockErpBaseUrl}}/api/journal-entries", "host": ["{{mockErpBaseUrl}}"], "path": ["api", "journal-entries"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"external_reference\": \"TXN-UNBALANCED-DEMO\",\n  \"entry_date\": \"2026-01-15\",\n  \"lines\": [\n    {\"account_code\": \"1200\", \"debit\": \"100.00\"},\n    {\"account_code\": \"1100\", \"credit\": \"50.00\"}\n  ]\n}"
+            }
+          }
+        },
+        {
+          "name": "9. Get Journal Entry by external_reference",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{mockErpBaseUrl}}/api/journal-entries/{{txnExternalRef}}",
+              "host": ["{{mockErpBaseUrl}}"],
+              "path": ["api", "journal-entries", "{{txnExternalRef}}"]
+            }
+          }
+        },
+        {
+          "name": "10. Check Balance: Loan Receivable (1200)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{mockErpBaseUrl}}/api/accounts/1200/balance",
+              "host": ["{{mockErpBaseUrl}}"],
+              "path": ["api", "accounts", "1200", "balance"]
+            }
+          }
+        },
+        {
+          "name": "11. Check Balance: Bank (1100)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{mockErpBaseUrl}}/api/accounts/1100/balance",
+              "host": ["{{mockErpBaseUrl}}"],
+              "path": ["api", "accounts", "1100", "balance"]
             }
           }
         }

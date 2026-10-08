@@ -1,0 +1,21 @@
+[tool.mypy]
+python_version = "3.12"
+strict = true
+disallow_untyped_defs = true
+plugins = ["pydantic.mypy"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 130
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+# B008: FastAPI's own canonical dependency-injection pattern is
+# `db: Session = Depends(get_db)` -- bugbear flags this as a generic
+# mutable-default-argument smell, which is a well-known false positive for
+# FastAPI code specifically (the framework calls Depends() once per request,
+# not once at function-definition time).
+ignore = ["B008"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

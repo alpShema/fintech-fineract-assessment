@@ -1,11 +1,8 @@
 # fintech-fineract-assessment — docker-compose.yml
 #
-# Phase 0 scope: Postgres + the customized-Fineract build pipeline, proven
-# end to end before any Part A Java changes land (fineract.patch is
-# currently empty, so this builds the *unmodified* pinned 1.10.0 tag).
-#
-# integration-service and mock-erp are scaffolded (see their directories)
-# but not wired in here yet -- added once they have something to run.
+# One command starts everything: db, the customized Fineract, the Mock ERP.
+# integration-service is scaffolded (see its directory) but not wired in here
+# yet -- added once it has something to run.
 
 services:
   db:
@@ -45,6 +42,24 @@ services:
       interval: 10s
       timeout: 5s
       retries: 60
+
+  mock-erp:
+    build:
+      context: ./mock-erp
+    image: fintech-fineract-assessment/mock-erp:1.0.0
+    restart: always
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      MOCK_ERP_DATABASE_URL: "postgresql+psycopg://mock_erp:mock_erp@db:5432/mock_erp"
+    ports:
+      - "8001:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
 
 volumes:
   fineract-db-data:
