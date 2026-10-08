@@ -1,0 +1,489 @@
+======================================================================
+PART K -- RECONCILIATION: seeding all four outcomes
+======================================================================
+1. MATCHED -- a normal disbursement, auto-posted correctly
+   loan=LN-K1-1791471825 reference=REF-K-MATCHED-1791471825
+2. MISSING_IN_ERP -- Fineract succeeds, ERP leg suppressed (fault-injected), left unrecovered
+   loan=LN-K2-1791471825 reference=REF-K-MISSING-ERP-1791471825 (deliberately left stuck -- no recovery sweep run)
+3. MISSING_IN_FINERACT -- a journal entry posted directly to the ERP, no Fineract transaction will ever carry this reference
+   reference=REF-K-MISSING-FINERACT-1791471825
+4. AMOUNT_MISMATCH -- a real Fineract disbursement, but its ERP entry (posted directly, auto-posting suppressed) has the wrong amount
+   loan=LN-K4-1791471825 reference=REF-K-MISMATCH-1791471825 (Fineract: 500000, ERP: 1234)
+======================================================================
+RUNNING RECONCILIATION REPORT (today's date range)
+======================================================================
+{
+    "items": [
+        {
+            "external_reference": "REF-FAULT-DISB-LN-T2-1791469528",
+            "status": "MATCHED",
+            "fineract_amount": "500000.0",
+            "erp_amount": "500000.00"
+        },
+        {
+            "external_reference": "REF-I1-DISB-1791470843447",
+            "status": "MATCHED",
+            "fineract_amount": "1000000.0",
+            "erp_amount": "1000000.00"
+        },
+        {
+            "external_reference": "REF-I1-DISB-1791471160761",
+            "status": "MATCHED",
+            "fineract_amount": "1000000.0",
+            "erp_amount": "1000000.00"
+        },
+        {
+            "external_reference": "REF-I1-DISB-1791471336342",
+            "status": "MATCHED",
+            "fineract_amount": "1000000.0",
+            "erp_amount": "1000000.00"
+        },
+        {
+            "external_reference": "REF-I1-DISB-1791471516876",
+            "status": "MATCHED",
+            "fineract_amount": "1000000.0",
+            "erp_amount": "1000000.00"
+        },
+        {
+            "external_reference": "REF-I1-DISB-1791471567336",
+            "status": "MATCHED",
+            "fineract_amount": "1000000.0",
+            "erp_amount": "1000000.00"
+        },
+        {
+            "external_reference": "REF-I2-DIFF-REF-1791470852137-1",
+            "status": "MATCHED",
+            "fineract_amount": "1000000.0",
+            "erp_amount": "1000000.00"
+        },
+        {
+            "external_reference": "REF-I2-DIFF-REF-1791471172292-0",
+            "status": "MATCHED",
+            "fineract_amount": "1000000.0",
+            "erp_amount": "1000000.00"
+        },
+        {
+            "external_reference": "REF-I2-DIFF-REF-1791471344091-0",
+            "status": "MATCHED",
+            "fineract_amount": "1000000.0",
+            "erp_amount": "1000000.00"
+        },
+        {
+            "external_reference": "REF-I2-DIFF-REF-1791471523441-1",
+            "status": "MATCHED",
+            "fineract_amount": "1000000.0",
+            "erp_amount": "1000000.00"
+        },
+        {
+            "external_reference": "REF-I2-DIFF-REF-1791471573918-1",
+            "status": "MATCHED",
+            "fineract_amount": "1000000.0",
+            "erp_amount": "1000000.00"
+        },
+        {
+            "external_reference": "REF-I2-SAME-REF-1791470847787",
+            "status": "MATCHED",
+            "fineract_amount": "1000000.0",
+            "erp_amount": "1000000.00"
+        },
+        {
+            "external_reference": "REF-I2-SAME-REF-1791471167737",
+            "status": "MATCHED",
+            "fineract_amount": "1000000.0",
+            "erp_amount": "1000000.00"
+        },
+        {
+            "external_reference": "REF-I2-SAME-REF-1791471339144",
+            "status": "MATCHED",
+            "fineract_amount": "1000000.0",
+            "erp_amount": "1000000.00"
+        },
+        {
+            "external_reference": "REF-I2-SAME-REF-1791471519580",
+            "status": "MATCHED",
+            "fineract_amount": "1000000.0",
+            "erp_amount": "1000000.00"
+        },
+        {
+            "external_reference": "REF-I2-SAME-REF-1791471570889",
+            "status": "MATCHED",
+            "fineract_amount": "1000000.0",
+            "erp_amount": "1000000.00"
+        },
+        {
+            "external_reference": "REF-I3-DISB-1791470856877",
+            "status": "MATCHED",
+            "fineract_amount": "2000000.0",
+            "erp_amount": "2000000.00"
+        },
+        {
+            "external_reference": "REF-I3-DISB-1791471176669",
+            "status": "MATCHED",
+            "fineract_amount": "2000000.0",
+            "erp_amount": "2000000.00"
+        },
+        {
+            "external_reference": "REF-I3-DISB-1791471346820",
+            "status": "MATCHED",
+            "fineract_amount": "2000000.0",
+            "erp_amount": "2000000.00"
+        },
+        {
+            "external_reference": "REF-I3-DISB-1791471528899",
+            "status": "MATCHED",
+            "fineract_amount": "2000000.0",
+            "erp_amount": "2000000.00"
+        },
+        {
+            "external_reference": "REF-I3-DISB-1791471578244",
+            "status": "MATCHED",
+            "fineract_amount": "2000000.0",
+            "erp_amount": "2000000.00"
+        },
+        {
+            "external_reference": "REF-I3-REPAY-1791470858252-1",
+            "status": "MATCHED",
+            "fineract_amount": "50000.0",
+            "erp_amount": "50000.00"
+        },
+        {
+            "external_reference": "REF-I3-REPAY-1791470858252-6",
+            "status": "MATCHED",
+            "fineract_amount": "50000.0",
+            "erp_amount": "50000.00"
+        },
+        {
+            "external_reference": "REF-I3-REPAY-1791470858252-7",
+            "status": "MATCHED",
+            "fineract_amount": "50000.0",
+            "erp_amount": "50000.00"
+        },
+        {
+            "external_reference": "REF-I3-REPAY-1791470858252-DUP",
+            "status": "MATCHED",
+            "fineract_amount": "50000.0",
+            "erp_amount": "50000.00"
+        },
+        {
+            "external_reference": "REF-I3-REPAY-1791471177852-0",
+            "status": "MATCHED",
+            "fineract_amount": "50000.0",
+            "erp_amount": "50000.00"
+        },
+        {
+            "external_reference": "REF-I3-REPAY-1791471177852-1",
+            "status": "MATCHED",
+            "fineract_amount": "50000.0",
+            "erp_amount": "50000.00"
+        },
+        {
+            "external_reference": "REF-I3-REPAY-1791471177852-2",
+            "status": "MATCHED",
+            "fineract_amount": "50000.0",
+            "erp_amount": "50000.00"
+        },
+        {
+            "external_reference": "REF-I3-REPAY-1791471177852-3",
+            "status": "MATCHED",
+            "fineract_amount": "50000.0",
+            "erp_amount": "50000.00"
+        },
+        {
+            "external_reference": "REF-I3-REPAY-1791471177852-4",
+            "status": "MATCHED",
+            "fineract_amount": "50000.0",
+            "erp_amount": "50000.00"
+        },
+        {
+            "external_reference": "REF-I3-REPAY-1791471177852-5",
+            "status": "MATCHED",
+            "fineract_amount": "50000.0",
+            "erp_amount": "50000.00"
+        },
+        {
+            "external_reference": "REF-I3-REPAY-1791471177852-6",
+            "status": "MATCHED",
+            "fineract_amount": "50000.0",
+            "erp_amount": "50000.00"
+        },
+        {
+            "external_reference": "REF-I3-REPAY-1791471177852-7",
+            "status": "MATCHED",
+            "fineract_amount": "50000.0",
+            "erp_amount": "50000.00"
+        },
+        {
+            "external_reference": "REF-I3-REPAY-1791471177852-DUP",
+            "status": "MATCHED",
+            "fineract_amount": "50000.0",
+            "erp_amount": "50000.00"
+        },
+        {
+            "external_reference": "REF-I3-REPAY-1791471347778-0",
+            "status": "MATCHED",
+            "fineract_amount": "50000.0",
+            "erp_amount": "50000.00"
+        },
+        {
+            "external_reference": "REF-I3-REPAY-1791471347778-1",
+            "status": "MATCHED",
+            "fineract_amount": "50000.0",
+            "erp_amount": "50000.00"
+        },
+        {
+            "external_reference": "REF-I3-REPAY-1791471347778-2",
+            "status": "MATCHED",
+            "fineract_amount": "50000.0",
+            "erp_amount": "50000.00"
+        },
+        {
+            "external_reference": "REF-I3-REPAY-1791471347778-3",
+            "status": "MATCHED",
+            "fineract_amount": "50000.0",
+            "erp_amount": "50000.00"
+        },
+        {
+            "external_reference": "REF-I3-REPAY-1791471347778-4",
+            "status": "MATCHED",
+            "fineract_amount": "50000.0",
+            "erp_amount": "50000.00"
+        },
+        {
+            "external_reference": "REF-I3-REPAY-1791471347778-5",
+            "status": "MATCHED",
+            "fineract_amount": "50000.0",
+            "erp_amount": "50000.00"
+        },
+        {
+            "external_reference": "REF-I3-REPAY-1791471347778-6",
+            "status": "MATCHED",
+            "fineract_amount": "50000.0",
+            "erp_amount": "50000.00"
+        },
+        {
+            "external_reference": "REF-I3-REPAY-1791471347778-7",
+            "status": "MATCHED",
+            "fineract_amount": "50000.0",
+            "erp_amount": "50000.00"
+        },
+        {
+            "external_reference": "REF-I3-REPAY-1791471347778-DUP",
+            "status": "MATCHED",
+            "fineract_amount": "50000.0",
+            "erp_amount": "50000.00"
+        },
+        {
+            "external_reference": "REF-I3-REPAY-1791471530622-0",
+            "status": "MATCHED",
+            "fineract_amount": "50000.0",
+            "erp_amount": "50000.00"
+        },
+        {
+            "external_reference": "REF-I3-REPAY-1791471530622-1",
+            "status": "MATCHED",
+            "fineract_amount": "50000.0",
+            "erp_amount": "50000.00"
+        },
+        {
+            "external_reference": "REF-I3-REPAY-1791471530622-2",
+            "status": "MATCHED",
+            "fineract_amount": "50000.0",
+            "erp_amount": "50000.00"
+        },
+        {
+            "external_reference": "REF-I3-REPAY-1791471530622-3",
+            "status": "MATCHED",
+            "fineract_amount": "50000.0",
+            "erp_amount": "50000.00"
+        },
+        {
+            "external_reference": "REF-I3-REPAY-1791471530622-4",
+            "status": "MATCHED",
+            "fineract_amount": "50000.0",
+            "erp_amount": "50000.00"
+        },
+        {
+            "external_reference": "REF-I3-REPAY-1791471530622-5",
+            "status": "MATCHED",
+            "fineract_amount": "50000.0",
+            "erp_amount": "50000.00"
+        },
+        {
+            "external_reference": "REF-I3-REPAY-1791471530622-6",
+            "status": "MATCHED",
+            "fineract_amount": "50000.0",
+            "erp_amount": "50000.00"
+        },
+        {
+            "external_reference": "REF-I3-REPAY-1791471530622-7",
+            "status": "MATCHED",
+            "fineract_amount": "50000.0",
+            "erp_amount": "50000.00"
+        },
+        {
+            "external_reference": "REF-I3-REPAY-1791471530622-DUP",
+            "status": "MATCHED",
+            "fineract_amount": "50000.0",
+            "erp_amount": "50000.00"
+        },
+        {
+            "external_reference": "REF-I3-REPAY-1791471579482-0",
+            "status": "MATCHED",
+            "fineract_amount": "50000.0",
+            "erp_amount": "50000.00"
+        },
+        {
+            "external_reference": "REF-I3-REPAY-1791471579482-1",
+            "status": "MATCHED",
+            "fineract_amount": "50000.0",
+            "erp_amount": "50000.00"
+        },
+        {
+            "external_reference": "REF-I3-REPAY-1791471579482-2",
+            "status": "MATCHED",
+            "fineract_amount": "50000.0",
+            "erp_amount": "50000.00"
+        },
+        {
+            "external_reference": "REF-I3-REPAY-1791471579482-3",
+            "status": "MATCHED",
+            "fineract_amount": "50000.0",
+            "erp_amount": "50000.00"
+        },
+        {
+            "external_reference": "REF-I3-REPAY-1791471579482-4",
+            "status": "MATCHED",
+            "fineract_amount": "50000.0",
+            "erp_amount": "50000.00"
+        },
+        {
+            "external_reference": "REF-I3-REPAY-1791471579482-5",
+            "status": "MATCHED",
+            "fineract_amount": "50000.0",
+            "erp_amount": "50000.00"
+        },
+        {
+            "external_reference": "REF-I3-REPAY-1791471579482-6",
+            "status": "MATCHED",
+            "fineract_amount": "50000.0",
+            "erp_amount": "50000.00"
+        },
+        {
+            "external_reference": "REF-I3-REPAY-1791471579482-7",
+            "status": "MATCHED",
+            "fineract_amount": "50000.0",
+            "erp_amount": "50000.00"
+        },
+        {
+            "external_reference": "REF-I3-REPAY-1791471579482-DUP",
+            "status": "MATCHED",
+            "fineract_amount": "50000.0",
+            "erp_amount": "50000.00"
+        },
+        {
+            "external_reference": "REF-K-MATCHED-1791471825",
+            "status": "MATCHED",
+            "fineract_amount": "500000.0",
+            "erp_amount": "500000.00"
+        },
+        {
+            "external_reference": "REF-K-MISMATCH-1791471825",
+            "status": "AMOUNT_MISMATCH",
+            "fineract_amount": "500000.0",
+            "erp_amount": "1234.00"
+        },
+        {
+            "external_reference": "REF-K-MISSING-ERP-1791471825",
+            "status": "MISSING_IN_ERP",
+            "fineract_amount": "500000.0",
+            "erp_amount": null
+        },
+        {
+            "external_reference": "REF-K-MISSING-FINERACT-1791471825",
+            "status": "MISSING_IN_FINERACT",
+            "fineract_amount": null,
+            "erp_amount": "75000.00"
+        },
+        {
+            "external_reference": "REF-S1-DISB-1791470706",
+            "status": "MATCHED",
+            "fineract_amount": "500000.0",
+            "erp_amount": "500000.00"
+        },
+        {
+            "external_reference": "REF-S2-DISB-B-1791470407",
+            "status": "MATCHED",
+            "fineract_amount": "500000.0",
+            "erp_amount": "500000.00"
+        },
+        {
+            "external_reference": "REF-S2-DISB-B-1791470713",
+            "status": "MATCHED",
+            "fineract_amount": "500000.0",
+            "erp_amount": "500000.00"
+        },
+        {
+            "external_reference": "REF-S3-DISB-1791470436",
+            "status": "MATCHED",
+            "fineract_amount": "500000.0",
+            "erp_amount": "500000.00"
+        },
+        {
+            "external_reference": "REF-S3-DISB-1791470718",
+            "status": "MATCHED",
+            "fineract_amount": "500000.0",
+            "erp_amount": "500000.00"
+        },
+        {
+            "external_reference": "REF-S4-DISB-1791470457",
+            "status": "MATCHED",
+            "fineract_amount": "500000.0",
+            "erp_amount": "500000.00"
+        },
+        {
+            "external_reference": "REF-S4-DISB-1791470722",
+            "status": "MATCHED",
+            "fineract_amount": "500000.0",
+            "erp_amount": "500000.00"
+        },
+        {
+            "external_reference": "REF-S5-DISB-1791470627",
+            "status": "MATCHED",
+            "fineract_amount": "500000.0",
+            "erp_amount": "500000.00"
+        },
+        {
+            "external_reference": "REF-S5-DISB-1791470726",
+            "status": "MATCHED",
+            "fineract_amount": "500000.0",
+            "erp_amount": "500000.00"
+        },
+        {
+            "external_reference": "REF-T2-DISB-1791469494",
+            "status": "MATCHED",
+            "fineract_amount": "1000000.0",
+            "erp_amount": "1000000.00"
+        },
+        {
+            "external_reference": "REF-T2-REPAY-1791469513",
+            "status": "MATCHED",
+            "fineract_amount": "100000.0",
+            "erp_amount": "100000.00"
+        },
+        {
+            "external_reference": "TEST-EXT-REF-123",
+            "status": "MISSING_IN_ERP",
+            "fineract_amount": "1000.0",
+            "erp_amount": null
+        }
+    ],
+    "summary": {
+        "MATCHED": 73,
+        "MISSING_IN_ERP": 2,
+        "MISSING_IN_FINERACT": 1,
+        "AMOUNT_MISMATCH": 1,
+        "REVERSED": 0
+    }
+}
+======================================================================
+PART K DEMO COMPLETE -- all four outcomes present in the report above

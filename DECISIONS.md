@@ -498,3 +498,293 @@ branch in `_sync_one_account()` populated `fineract_gl_account_id` from the stor
 result but never carried the stored `error` message across the replay path. Fixed, and
 a regression test (`test_resync_of_previously_failed_account_still_reports_error`)
 added so the unit suite would catch this specific shape of bug on its own next time.
+
+## Tier 2 — Reliability (Parts H, I, J, K)
+
+Everything in this section was verified against the real running stack (Fineract
+1.10.0, Mock ERP, Postgres), not just the mocked unit suite — several of the bugs
+below were only ever visible under real concurrency or real Fineract responses, and
+would not have been caught by respx-mocked tests alone.
+
+### Part H — Accounting mapping
+
+`app/accounting_mapping.py` is a pure function pair, `disbursement_journal_lines()`
+and `repayment_journal_lines()`, taking a Fineract transaction dict exactly as
+`GET /loans/{id}?associations=transactions` returns it — confirmed live against a
+real disbursement and repayment on the running container before writing the mapping,
+not assumed from documentation. Disbursement: DR Loan Receivable (1200) / CR Bank
+(1100), both for the transaction's `amount` (Fineract doesn't split a disbursement
+into principal/interest — the whole amount is principal movement). Repayment: DR
+Bank (amount) / CR Loan Receivable (`principalPortion`) / CR Interest Income
+(`interestPortion`, with fees/penalties folded in). The split comes from Fineract's
+own transaction breakdown — **never recalculated here** — satisfying the brief's
+explicit requirement directly: this service has no interest-calculation logic of its
+own to get out of sync with Fineract's.
+
+Fees/penalties fold into Interest Income rather than raising, because a loan product
+with charges is an ordinary case (this system has no dedicated fee/penalty GL
+account, and erroring on every repayment of a product that happens to have fees
+would be wrong). Overpayment (`overpaymentPortion > 0`) does raise — it genuinely
+needs a suspense/liability account this chart of accounts doesn't have. Reversals: a
+Fineract transaction with `manuallyReversed: true` is never fed to this mapping at
+all — Part K's reconciliation excludes it from normal matching and reports it under
+its own `REVERSED` bucket instead, since comparing it against a journal entry would
+compare a stale amount against something that no longer reflects reality. Per the
+brief, documenting overpayment/reversal handling is required but demonstrating it is
+optional — a real system would need a suspense account and a reversing entry (DR/CR
+swapped, keyed off a derived reference like `{original}-REVERSAL`); neither is built.
+
+**Bug found live, not by the unit suite**: a repayment that's entirely principal (no
+interest owed that period — a real, common case, not an edge case) produced an
+Interest Income line with `credit=0`. Mock ERP's own schema correctly rejects a
+zero-amount line (`must have exactly one of debit/credit > 0, not both or neither`),
+so every one of these repayments failed with a 422. Found while running Part I's
+concurrent-repayment test against the real stack — several of many rapid repayments
+on one loan ended up with a zero interest portion once interest for that period had
+already been paid by an earlier concurrent repayment. Fixed by omitting whichever
+side (principal or interest) is genuinely zero, with a safety-net `ValueError` if
+*both* would be omitted (nothing left to credit against the Bank debit).
+
+### The state machine (shared backbone for Parts I and J)
+
+`IdempotentOperation` (already built in Part F) gained three new `OperationStatus`
+values — `FINERACT_DONE`, `ERP_PENDING`, `NEEDS_RECONCILIATION` — used only by
+`LOAN_DISBURSEMENT`/`LOAN_REPAYMENT`'s two-leg flow. The brief's example state list is
+`RECEIVED -> FINERACT_PENDING -> FINERACT_DONE -> ERP_PENDING -> COMPLETED`, plus
+`FAILED`/`NEEDS_RECONCILIATION`. `RECEIVED` and `FINERACT_PENDING` collapse into the
+existing `IN_PROGRESS` value deliberately — there is no real work done between "a
+request arrived" and "about to call Fineract," so persisting them as two separate
+rows would just be two states that always transition together. No existing value was
+renamed, so none of Part F's already-passing tests were put at risk.
+
+Transitions: `IN_PROGRESS` → Fineract call succeeds → `FINERACT_DONE` (with
+`fineract_transaction_id` persisted **immediately**, before the ERP leg is ever
+attempted — this one write is what makes a crash between the two legs recoverable) →
+`ERP_PENDING` → ERP call succeeds → `COMPLETED`. A genuine Fineract rejection (a real
+4xx, not a timeout) goes `IN_PROGRESS` → `FAILED` directly. An ERP failure/timeout
+after `FINERACT_DONE` goes to `NEEDS_RECONCILIATION`, deliberately *not* `FAILED` —
+Fineract's money already moved, so this isn't a clean "nothing happened" failure; a
+recovery sweep owns retrying just the ERP leg from here.
+
+Two new columns support this: `fineract_transaction_id` (the durable fact a crash or
+stale-row sweep keys off) and `loan_reference`/`fineract_loan_id` (denormalized —
+also derivable via `LoanMapping`, kept directly on the row so the recovery sweep
+never needs a join per stuck row).
+
+### Fixing `_RaceLost` — a real, pre-existing bug found by re-reading the code
+
+`start_operation()` already raised an internal `RaceLost` exception when it lost an
+insert race (an `IntegrityError` on the unique constraint), carrying the
+`IdempotencyDecision` the caller should act on instead. **No router caught it,
+anywhere** — all five call sites (`accounts.py`, `clients.py`, and three in
+`loans.py`). Under real concurrency this surfaced as an unhandled exception → a 500,
+not a clean replay. Found by direct code inspection before any concurrency test was
+even written, confirmed by a new unit test (`test_start_operation_losing_the_...
+_race_raises_race_lost`) that simulates the race deterministically (call
+`start_operation()` twice with the same key), and later reconfirmed live under Part
+I's real concurrent test. Fixed by wrapping every `start_operation()` call in a
+try/except that converts `RaceLost` into the same replay response
+`check_idempotency()` would have given directly.
+
+### A second bug the fix surfaced: disbursement's scope_key could permanently brick a loan
+
+`uq_operation_scope_key` allows exactly one row, ever, per loan (by design — that's
+how "exactly one disbursement per loan" is enforced). But a FAILED disbursement
+attempt (e.g. Fineract was genuinely unreachable) still occupies that one row
+forever: every subsequent disbursement attempt for that loan, even with a brand new
+`external_reference`, would hit the same dead FAILED row and replay its stale error —
+permanently, with no path back to a real attempt. Found live while manually verifying
+Part J scenario 2 ("Fineract down... safe to retry?") with a fresh reference — the
+retry was wrongly blocked. Fixed with `retry_scope_operation()`: when
+`check_idempotency()` reports a FAILED match found via the *scope_key* axis
+(distinguished from an external_reference match via a new `matched_via` field on
+`IdempotencyDecision`), the router repurposes that one row in place (new
+`external_reference`, new payload, status back to `IN_PROGRESS`) rather than
+replaying a dead failure — an UPDATE, never a second INSERT, so the unique
+constraint is never re-tested. Deliberately scoped to the scope_key axis only: a
+FAILED match on the *external_reference* axis (the literal same request resent)
+still replays its real failure, same as every other operation type — that's a
+different request being retried, not evidence the prior attempt definitely never
+happened.
+
+### A third bug: Fineract's own optimistic-lock conflict wasn't retried
+
+Found live under Part I's concurrent-repayment test: firing several *genuinely
+distinct* (non-duplicate) repayments at one loan simultaneously got some of them
+rejected with Fineract's own `HTTP 409`,
+`error.msg.platform.service.query.conflict` — Hibernate's optimistic-locking version
+check failing because two writes raced against the same loan entity. Fineract's own
+message literally says "please try again." This is Fineract's concurrency control
+doing exactly what it's designed to do, not a business-rule rejection and not
+something our idempotency layer is meant to prevent (these are different references,
+each a legitimate, distinct repayment). Fixed in `FineractClient._request()`: a
+bounded retry (5 attempts, short linear backoff) specifically on this one
+globalisation code — any other 409 fails immediately, since burning retries on a
+genuine business-rule conflict would be wrong.
+
+### Fault injection (Part J: "build a way to inject failures on demand")
+
+`app/fault_injection.py` — an in-process, admin-toggled registry (`arm`/`clear`/
+`status`/`peek`/`consume`), nothing fancier (no proxy, no feature-flag service). Two
+modes per target (`fineract_disburse`, `fineract_repay`, `erp_journal_entry`): `down`
+(raise `httpx.ConnectError` before the real call is ever made — Scenario 2) and
+`timeout_after_send` (make the real call — so the downstream genuinely processes it —
+then discard the response and raise `httpx.TimeoutException` instead of returning —
+Scenarios 3/4). Each armed fault auto-clears after its configured trigger count so a
+forgotten toggle can't bleed into the next run. `app/routers/admin.py` exposes this
+behind the same API key as every other route, plus `POST /api/admin/recover` (the
+sweep, below) — clearly a test/demo harness, not a production admin surface.
+
+**A fourth bug this surfaced**: `httpx.ConnectError` (the "down" mode) wasn't caught
+anywhere in `disburse_loan`/`repay_loan` either — only `FineractError` and
+`httpx.TimeoutException` were. A genuinely unreachable Fineract produced an unhandled
+500, found the moment Scenario 2 was first tested live. Fixed with its own except
+clause: unlike a timeout, a `ConnectError` means the request never left this process
+at all — there's no ambiguity to resolve via the externalId lookup, so it fails
+cleanly and immediately (`fail_operation`, 503) rather than going through the
+timeout-recovery path.
+
+### Recovery (`app/recovery.py`) — one set of functions, three callers
+
+`recover_unconfirmed_fineract_call()` is Part J3's mechanism exactly as hinted:
+"send your reference as Fineract's externalId and look it up; do not blindly retry."
+Every disbursement/repayment now sends `externalId: external_reference` on the
+Fineract command itself (confirmed live that Fineract accepts and echoes this back,
+both on create and on a later `GET`). On a timeout, `find_loan_transaction_by_
+external_id()` searches the loan's transaction list for that exact `externalId` —
+found → it happened, proceed to the ERP leg using the real transaction data; not
+found and still within a short grace window → leave `IN_PROGRESS` (could still be
+genuinely in flight); not found past the grace window → `FAILED` (confidently: safe
+to retry with a new reference).
+
+This same function set is called from three places: inline when a Fineract call
+times out (Scenario 3), inline right after a normal Fineract success to attempt the
+ERP leg (`complete_fineract_leg_and_post_to_erp()`), and from
+`run_recovery_sweep()` — which scans every `IN_PROGRESS`/`FINERACT_DONE`/
+`ERP_PENDING`/`NEEDS_RECONCILIATION` row for the two-leg operation types and drives
+each one forward one step. The sweep runs automatically once at app startup
+(`main.py`'s lifespan, before the app accepts traffic) — covering Scenario 5 (crash
+recovery) with zero manual intervention — and is also exposed as
+`POST /api/admin/recover` for an operator (or Scenario 1's "how does the ERP catch
+up"/Scenario 4's "prove one journal entry exists" demonstrations) to call on demand.
+No backoff/retry-count bookkeeping was added: "recovery without a worker is
+acceptable" per the brief, and each sweep invocation is itself one bounded attempt —
+the calling cadence (a cron, an operator, another demo request) *is* the retry
+policy, which is simple and enough for everything demonstrated here.
+
+All five scenarios were walked through live against the real stack (not just
+unit-tested) via `scripts/demo-part-j-failure-scenarios.sh`
+(`evidence/part-j-failure-scenarios.log`):
+1. **ERP down after Fineract success**: caller gets `202 NEEDS_RECONCILIATION`
+   (never a false success); Fineract's loan state confirms the money really moved;
+   resending the same reference replays the same status (never re-disburses); the
+   recovery sweep retries only the ERP leg and reaches `COMPLETED`.
+2. **Fineract down**: caller gets a clean `502`; the loan's Fineract state is
+   confirmed unchanged (nothing persisted); a fresh reference once Fineract is back
+   succeeds normally — proving the scope_key-brick fix above actually works live.
+3. **Fineract timeout after sending**: the real call lands at Fineract regardless;
+   the externalId lookup finds it and completes the whole flow (including the ERP
+   leg) transparently within the same request — the caller never even sees a hint
+   that a timeout was simulated internally.
+4. **ERP timeout after the entry was written**: the entry really gets written;
+   the recovery sweep's retry hits Mock ERP's own external_reference idempotency
+   (not a fresh INSERT), so exactly one entry ends up existing, confirmed by listing
+   today's entries and counting matches for that reference.
+5. **Crash between Fineract success and the ERP call**: simulated by leaving a row
+   at `NEEDS_RECONCILIATION` and literally restarting the container
+   (`docker compose restart`) rather than calling the admin endpoint — the startup
+   sweep found and completed it before the app finished starting, with zero manual
+   action taken.
+
+### Part I — Duplicates and concurrency
+
+**I1** (sequential ×4): the same disbursement request sent 4 times gives exactly one
+`201` and three `200` replays; Fineract shows exactly one disbursement transaction;
+Mock ERP shows exactly one journal entry; the transactions endpoint shows exactly one
+`COMPLETED` integration operation. All four counts checked independently — any one
+alone doesn't prove the end-to-end invariant.
+
+**I2** (≥10 concurrent disbursements, same loan, both same-reference and
+different-reference batches): a standalone script,
+`integration-service/concurrency_tests/test_concurrent_disbursement.py` — real
+`httpx.Client`s fired via `concurrent.futures.ThreadPoolExecutor` at the actually
+running Dockerized service, deliberately **not** pytest (a live-stack test
+accidentally collected by a bare `pytest` run in CI is a real hazard; SQLite's
+in-memory unit-test DB also can't meaningfully race against itself — there's only one
+connection). Both batches: exactly one `201`, the rest `202`/replay, zero `500`s,
+exactly one real Fineract disbursement, exactly one ERP entry.
+
+The financial invariant ("exactly one disbursement") is enforced by the **integration-DB
+unique constraint** (`uq_operation_scope_key`) — concretely, because
+`start_operation()`'s INSERT happens *before* the Fineract HTTP call in every
+handler, only the row that wins the INSERT ever reaches Fineract at all; every other
+concurrent request either sees the winner's row already in `check_idempotency()`, or
+loses the INSERT race and gets `RaceLost` (now caught, see above). **API idempotency**
+(the `check_idempotency()` pre-check) is a fast-path optimization on top of this, not
+itself a guarantee — under a true race, two requests can both pass it before either
+commits, which is exactly why the DB constraint, not the pre-check, is what's load-bearing.
+Two more layers exist independent of this service entirely: **Fineract's own loan
+externalId** (one Fineract loan per `loan_reference` — verified in Part C/D — so
+there's only ever one real loan to disburse in the first place) and, as the **true
+last line of defence**, **Fineract's own loan state machine** — confirmed live by
+attempting to disburse an already-`Active` loan a second time directly against
+Fineract: it rejects with its own domain-rule violation
+(`loan.disbursal.account.is.not.approve.not.disbursed.state`), regardless of what any
+layer above it does or fails to do. No single layer alone is enough: the API
+pre-check is racy by itself; the DB constraint protects *this service's* bookkeeping
+but says nothing about a caller bypassing it entirely; Fineract's own state machine
+is the only layer that would still hold even if every layer above it had a bug — which
+is exactly the role a last line of defence needs to play.
+
+**I3** (concurrent repayments, distinct references, one reference duplicated and
+sent twice): confirmed exactly one Fineract repayment transaction per distinct
+reference (the duplicate pair collapses to one); the final Fineract
+`totalOutstanding` matches `initial outstanding - sum of each repayment's own
+recorded amount` (not the amounts the test sent — Fineract's authoritative
+breakdown), exactly, to the cent. Getting a clean first-pass result here needed the
+Part H zero-amount-line fix and the optimistic-lock retry above — without either,
+several genuinely distinct repayments failed outright under concurrent load, which
+would have been a false negative on I3's actual requirement (each must apply exactly
+once, not "each must apply exactly once provided nothing else goes wrong first-try").
+A post-batch call to the recovery sweep is included in the test as routine cleanup
+for any individual repayment whose *own* ERP-posting leg loses a race under load
+(same `NEEDS_RECONCILIATION` state Part J already models) — this reached zero
+processed rows once the two fixes above were in place, but is kept in the script as
+the honest operational step a real caller would take after a noisy concurrent batch.
+
+### Part K — Reconciliation
+
+Replaces the Part E stub. Scope: iterate every `LoanMapping` row (every loan this
+service has ever touched — not an unbounded "all loans ever," since Fineract has no
+bulk transactions-by-date-range endpoint in this version), pull each loan's full
+transaction list via the single `GET /loans/{id}?associations=transactions` call
+(the same endpoint Part H and Part J3 already use — one more reason this endpoint is
+the right one to have standardized on everywhere), filter to disbursement/repayment
+transactions carrying a non-empty `externalId`, and match each against Mock ERP's
+journal entry for that same reference — fetched either individually
+(`external_references` given) or via the new `GET /api/journal-entries?entry_date_
+from=&entry_date_to=` list endpoint added to Mock ERP for this (it previously had no
+way to enumerate entries, only create and get-by-reference — needed specifically for
+the `MISSING_IN_FINERACT` direction: an ERP entry whose reference no Fineract
+transaction carries at all). Amounts are compared via each side's own total
+transaction magnitude (`transaction["amount"]` vs. the entry's total debit, which are
+equal by construction under Part H's mapping) rather than re-deriving principal/
+interest on the reconciliation side — reconciliation should notice when the two
+ledgers disagree, not quietly recompute one to match the other.
+
+A `manuallyReversed` Fineract transaction is excluded from normal matching and
+reported under its own `REVERSED` status, per the reversal handling described under
+Part H. Read-only by default, as the brief requires — no repair action is built;
+master-data (GL account) reconciliation is explicitly out of scope as a stretch item.
+
+All four outcomes were deliberately seeded and shown together in one report via
+`scripts/demo-part-k-reconciliation.sh` (`evidence/part-k-reconciliation.log`): a
+normal disbursement (`MATCHED`); a disbursement with its ERP leg fault-injected down
+and left unrecovered (`MISSING_IN_ERP`); a journal entry posted directly to Mock ERP
+under a reference no Fineract transaction will ever carry (`MISSING_IN_FINERACT`);
+and a real disbursement whose auto-posted entry was suppressed (fault injection) and
+replaced with one posted directly under the same reference but a deliberately wrong
+amount (`AMOUNT_MISMATCH`). The live report returned all four statuses correctly
+alongside ~70 genuinely `MATCHED` entries accumulated from the rest of this session's
+live testing — itself a small extra proof that the matching logic holds up against
+real accumulated state, not just a hand-picked small fixture.

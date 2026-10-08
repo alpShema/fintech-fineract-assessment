@@ -791,7 +791,7 @@
           }
         },
         {
-          "name": "13. Reconciliation (stub -- Part K, Tier 2, not yet implemented)",
+          "name": "13. Reconciliation (see the Tier 2 folder for seeded examples)",
           "request": {
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
@@ -801,6 +801,133 @@
               "path": ["api", "reconciliation"]
             },
             "body": { "mode": "raw", "raw": "{}" }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Tier 2 - Reliability (Parts H-K)",
+      "description": "Fault injection (Part J's 'build a way to inject failures on demand') and the reconciliation report (Part K). Run scripts/demo-part-j-failure-scenarios.sh and scripts/demo-part-k-reconciliation.sh for the full scripted walkthroughs -- these requests are for manual, ad-hoc exploration of the same admin surface.",
+      "auth": {
+        "type": "apikey",
+        "apikey": [
+          { "key": "key", "value": "X-Api-Key", "type": "string" },
+          { "key": "value", "value": "{{integrationServiceApiKey}}", "type": "string" },
+          { "key": "in", "value": "header", "type": "string" }
+        ]
+      },
+      "item": [
+        {
+          "name": "1. Arm Fault: Fineract down",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{integrationServiceBaseUrl}}/api/admin/fault-injection",
+              "host": ["{{integrationServiceBaseUrl}}"],
+              "path": ["api", "admin", "fault-injection"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"target\": \"fineract_disburse\",\n  \"mode\": \"down\",\n  \"times\": 1\n}"
+            }
+          }
+        },
+        {
+          "name": "1b. Arm Fault: ERP down after Fineract success",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{integrationServiceBaseUrl}}/api/admin/fault-injection",
+              "host": ["{{integrationServiceBaseUrl}}"],
+              "path": ["api", "admin", "fault-injection"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"target\": \"erp_journal_entry\",\n  \"mode\": \"down\",\n  \"times\": 1\n}"
+            }
+          }
+        },
+        {
+          "name": "1c. Arm Fault: timeout after send (Fineract or ERP really processes it, we just don't see the response)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{integrationServiceBaseUrl}}/api/admin/fault-injection",
+              "host": ["{{integrationServiceBaseUrl}}"],
+              "path": ["api", "admin", "fault-injection"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"target\": \"fineract_disburse\",\n  \"mode\": \"timeout_after_send\",\n  \"times\": 1\n}"
+            }
+          }
+        },
+        {
+          "name": "2. Check Armed Faults",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{integrationServiceBaseUrl}}/api/admin/fault-injection",
+              "host": ["{{integrationServiceBaseUrl}}"],
+              "path": ["api", "admin", "fault-injection"]
+            }
+          }
+        },
+        {
+          "name": "3. Clear All Armed Faults",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{integrationServiceBaseUrl}}/api/admin/fault-injection",
+              "host": ["{{integrationServiceBaseUrl}}"],
+              "path": ["api", "admin", "fault-injection"]
+            }
+          }
+        },
+        {
+          "name": "4. Run Recovery Sweep (also runs automatically at app startup)",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{integrationServiceBaseUrl}}/api/admin/recover",
+              "host": ["{{integrationServiceBaseUrl}}"],
+              "path": ["api", "admin", "recover"]
+            }
+          }
+        },
+        {
+          "name": "5. Reconciliation Report (by date range -- expect MATCHED/MISSING_IN_ERP/MISSING_IN_FINERACT/AMOUNT_MISMATCH)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{integrationServiceBaseUrl}}/api/reconciliation",
+              "host": ["{{integrationServiceBaseUrl}}"],
+              "path": ["api", "reconciliation"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"date_from\": \"2026-01-01\",\n  \"date_to\": \"2026-12-31\"\n}"
+            }
+          }
+        },
+        {
+          "name": "5b. Reconciliation Report (scoped to specific external_references)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{integrationServiceBaseUrl}}/api/reconciliation",
+              "host": ["{{integrationServiceBaseUrl}}"],
+              "path": ["api", "reconciliation"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"external_references\": [\"REF-INTSVC-LOAN-1\", \"REF-INTSVC-DISB-1\"]\n}"
+            }
           }
         }
       ]

@@ -1,0 +1,56 @@
+======================================================================
+PART J -- FAILURE HANDLING AND RECOVERY
+======================================================================
+SCENARIO 1: ERP down after Fineract success
+----------------------------------------------------------------------
+BEFORE: loan=Approved  ERP-entry-exists=404
+DURING: disbursing with ERP down...
+{"status":"NEEDS_RECONCILIATION","external_reference":"REF-S1-DISB-1791470706"} -> HTTP 202
+  -> Fineract succeeded (money moved), ERP leg failed: status is NEEDS_RECONCILIATION, not a plain FAILED --
+     a resend of the SAME reference replays NEEDS_RECONCILIATION (never re-disburses):
+{"status":"NEEDS_RECONCILIATION","external_reference":"REF-S1-DISB-1791470706"} -> HTTP 202
+AFTER (still stuck): loan=Active  ERP-entry-exists=404
+RECOVERING: calling the admin recovery sweep (retries only the ERP leg, never re-calls Fineract)...
+{"processed":1,"results":[{"external_reference":"REF-S1-DISB-1791470706","status_before":"NEEDS_RECONCILIATION","status_after":"COMPLETED","result_status_code":201}]}
+AFTER RECOVERY: loan=Active  ERP-entry-exists=200
+======================================================================
+SCENARIO 2: Fineract down
+----------------------------------------------------------------------
+BEFORE: loan=Approved
+DURING: disbursing with Fineract down...
+{"error_code":"UPSTREAM_ERROR","message":"Fineract unreachable: simulated: fineract_disburse down (fault injection)","correlation_id":"de1202ca-ff4a-4eb8-a513-6c848d15c51f"} -> HTTP 502
+  -> clean 502 UPSTREAM_ERROR, nothing persisted at Fineract:
+AFTER: loan=Approved (unchanged -- confirms nothing was persisted)
+Safe to retry? Yes -- a fresh reference for the same loan now (Fineract 'back up') succeeds normally:
+{"loan_reference":"LN-S2-1791470713","status":"Active","fineract_transaction_id":54} -> HTTP 201
+AFTER RETRY: loan=Active
+======================================================================
+SCENARIO 3: Fineract timeout after sending (the request DID land at Fineract; we just never saw the response)
+----------------------------------------------------------------------
+BEFORE: loan=Approved
+DURING: disbursing (real call lands at Fineract; our client simulates a timeout instead of seeing the response)...
+{"loan_reference":"LN-S3-1791470718","status":"Active","fineract_transaction_id":56} -> HTTP 201
+  -> Not a blind retry: we looked Fineract up by externalId (=REF-S3-DISB-1791470718), found the real disbursement,
+     and completed the whole flow (including the ERP leg) within this same request.
+AFTER: loan=Active  ERP-entry-exists=200
+======================================================================
+SCENARIO 4: ERP timeout after the entry was written
+----------------------------------------------------------------------
+DURING: disbursing (ERP really writes the entry; our client simulates a timeout instead of seeing the response)...
+{"status":"NEEDS_RECONCILIATION","external_reference":"REF-S4-DISB-1791470722"} -> HTTP 202
+  -> reports NEEDS_RECONCILIATION even though the entry already exists (we don't yet know that ourselves):
+RECOVERING: admin recovery sweep retries the ERP leg -- hits Mock ERP's OWN idempotency, no duplicate:
+{"processed":1,"results":[{"external_reference":"REF-S4-DISB-1791470722","status_before":"NEEDS_RECONCILIATION","status_after":"COMPLETED","result_status_code":201}]}
+PROOF: exactly one journal entry exists for REF-S4-DISB-1791470722:
+1 entry/entries
+======================================================================
+SCENARIO 5: crash between Fineract success and the ERP call -- recovered on restart
+----------------------------------------------------------------------
+DURING: disbursing (simulates the process dying right after the Fineract leg, before the ERP leg)...
+{"status":"NEEDS_RECONCILIATION","external_reference":"REF-S5-DISB-1791470726"} -> HTTP 202
+BEFORE RESTART: loan=Active  ERP-entry-exists=404 (stuck)
+Restarting the container (simulates recovery after a real crash, not a manual recovery call)...
+AFTER RESTART (no manual action taken): loan=Active  ERP-entry-exists=200
+  -> the startup sweep found the stuck row and completed it automatically before the app even finished starting.
+======================================================================
+PART J DEMO COMPLETE -- all 5 scenarios

@@ -1,0 +1,49 @@
+
+=== I1: sequential duplicates -- send the same disbursement 4 times ===
+  request 1/4 -> HTTP 201
+  request 2/4 -> HTTP 200
+  request 3/4 -> HTTP 200
+  request 4/4 -> HTTP 200
+Requests received: 4
+  [PASS] requests received == 4
+  [PASS] exactly one 201 (real creation), rest replays
+Fineract disbursements: 1
+  [PASS] Fineract disbursements == 1
+ERP journal entries: 1
+  [PASS] ERP journal entries == 1
+Integration transaction status: COMPLETED
+  [PASS] Integration transactions == 1 (COMPLETED)
+
+=== I2: 10 concurrent disbursements, SAME reference(s) ===
+  10 concurrent requests fired, statuses: [201, 202, 202, 202, 202, 202, 202, 202, 202, 202]
+  [PASS] no 500s (every request got a clean response)
+  [PASS] exactly one 201 among the batch
+Fineract disbursements on this loan: 1
+  [PASS] exactly one Fineract disbursement
+ERP journal entries for this batch's references: 1
+  [PASS] exactly one ERP journal entry
+
+=== I2: 10 concurrent disbursements, DIFFERENT reference(s) ===
+  10 concurrent requests fired, statuses: [201, 202, 202, 202, 202, 202, 202, 202, 202, 202]
+  [PASS] no 500s (every request got a clean response)
+  [PASS] exactly one 201 among the batch
+Fineract disbursements on this loan: 1
+  [PASS] exactly one Fineract disbursement
+ERP journal entries for this batch's references: 1
+  [PASS] exactly one ERP journal entry
+
+=== I3: 10 concurrent repayments, different references (+ duplicates of one) ===
+  initial outstanding (post-disbursement): 2200321.0
+  10 concurrent requests (8 distinct + 1 duplicate sent twice), statuses: [201, 201, 201, 201, 201, 201, 201, 201, 201, 202]
+  [PASS] no 500s
+  post-batch recovery sweep: {'processed': 0, 'results': []}
+Fineract repayment transactions on this loan: 9, distinct externalIds: 9
+  [PASS] duplicate reference applied exactly once at Fineract
+  [PASS] no extra repayment transactions beyond the unique references sent
+ERP journal entries for this batch's references: 9 (expected 9)
+  [PASS] one ERP journal entry per distinct reference (incl. the deduped pair)
+  final outstanding: 1750321.0, expected (initial - sum of Fineract's own recorded amounts): 1750321.0
+  [PASS] final outstanding matches Fineract's own recorded breakdown
+
+======================================================================
+ALL PART I CHECKS PASSED
