@@ -79,8 +79,25 @@ def _lines_to_entry_payload(
     }
 
 
+def _log_fields(operation: IdempotentOperation, correlation_id: str | None) -> dict[str, Any]:
+    """The brief's observability field set, drawn from whatever this
+    operation already knows about itself -- used by every log line in this
+    module so a sweep-triggered recovery and an inline one log identically
+    (minus correlation_id, which only an inline call actually has)."""
+    return {
+        "correlation_id": correlation_id,
+        "external_reference": operation.external_reference,
+        "loan_reference": operation.loan_reference,
+        "fineract_transaction_id": operation.fineract_transaction_id,
+    }
+
+
 def _post_to_erp(
-    db: Session, mock_erp: MockErpClient, operation: IdempotentOperation, transaction: dict[str, Any]
+    db: Session,
+    mock_erp: MockErpClient,
+    operation: IdempotentOperation,
+    transaction: dict[str, Any],
+    correlation_id: str | None = None,
 ) -> RecoveryResult:
     mapper = _MAPPERS[operation.operation_type]
     try:
@@ -92,27 +109,28 @@ def _post_to_erp(
         mark_needs_reconciliation(db, operation, detail)
         logger.error(
             "cannot derive journal entry, needs reconciliation",
-            extra={"external_reference": operation.external_reference, "status": "NEEDS_RECONCILIATION"},
+            extra={**_log_fields(operation, correlation_id), "status": "NEEDS_RECONCILIATION"},
         )
         return RecoveryResult(202, {"status": "NEEDS_RECONCILIATION", "external_reference": operation.external_reference})
 
     mark_erp_pending(db, operation)
     entry_payload = _lines_to_entry_payload(operation, transaction, lines)
     try:
-        mock_erp.create_journal_entry(entry_payload)
+        erp_result = mock_erp.create_journal_entry(entry_payload)
     except (MockErpError, httpx.TimeoutException, httpx.ConnectError) as exc:
         mark_needs_reconciliation(db, operation, {"error": str(exc)})
         logger.warning(
             "ERP leg failed, needs reconciliation",
-            extra={"external_reference": operation.external_reference, "status": "NEEDS_RECONCILIATION"},
+            extra={**_log_fields(operation, correlation_id), "status": "NEEDS_RECONCILIATION"},
         )
         return RecoveryResult(202, {"status": "NEEDS_RECONCILIATION", "external_reference": operation.external_reference})
 
     body = _final_response_body(operation)
+    body["erp_transaction_id"] = erp_result.get("id")
     complete_operation(db, operation, 201, body)
     logger.info(
         "two-leg operation completed",
-        extra={"external_reference": operation.external_reference, "status": "COMPLETED"},
+        extra={**_log_fields(operation, correlation_id), "erp_transaction_id": erp_result.get("id"), "status": "COMPLETED"},
     )
     return RecoveryResult(201, body)
 
@@ -122,16 +140,21 @@ def complete_fineract_leg_and_post_to_erp(
     mock_erp: MockErpClient,
     operation: IdempotentOperation,
     fineract_transaction: dict[str, Any],
+    correlation_id: str | None = None,
 ) -> RecoveryResult:
     """Normal happy path: Fineract just confirmed success inline. Persist that
     fact immediately (so a crash from here on is recoverable), then attempt
     the ERP leg."""
     mark_fineract_done(db, operation, fineract_transaction["id"])
-    return _post_to_erp(db, mock_erp, operation, fineract_transaction)
+    return _post_to_erp(db, mock_erp, operation, fineract_transaction, correlation_id=correlation_id)
 
 
 def recover_unconfirmed_fineract_call(
-    db: Session, fineract: FineractClient, mock_erp: MockErpClient, operation: IdempotentOperation
+    db: Session,
+    fineract: FineractClient,
+    mock_erp: MockErpClient,
+    operation: IdempotentOperation,
+    correlation_id: str | None = None,
 ) -> RecoveryResult:
     """Part J scenario 3: the Fineract call itself timed out (or the process
     crashed before recording the outcome) and operation.fineract_transaction_id
@@ -141,7 +164,7 @@ def recover_unconfirmed_fineract_call(
     assert operation.fineract_loan_id is not None  # always set at operation-creation time for these two operation types
     transaction = fineract.find_loan_transaction_by_external_id(operation.fineract_loan_id, operation.external_reference)
     if transaction is not None:
-        return complete_fineract_leg_and_post_to_erp(db, mock_erp, operation, transaction)
+        return complete_fineract_leg_and_post_to_erp(db, mock_erp, operation, transaction, correlation_id=correlation_id)
 
     # SQLite (unit tests) returns naive datetimes even for a `DateTime(timezone=True)`
     # column; Postgres (real deployment) returns tz-aware ones. Coerce rather
@@ -161,7 +184,7 @@ def recover_unconfirmed_fineract_call(
     fail_operation(db, operation, 502, detail)
     logger.warning(
         "Fineract call never landed, marking FAILED",
-        extra={"external_reference": operation.external_reference, "status": "FAILED"},
+        extra={**_log_fields(operation, correlation_id), "status": "FAILED"},
     )
     return RecoveryResult(502, detail)
 

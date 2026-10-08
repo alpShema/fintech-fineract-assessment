@@ -143,6 +143,7 @@ def test_disburse_loan(client: TestClient, db_session: Session) -> None:
     )
     assert resp.status_code == 201
     assert resp.json()["fineract_transaction_id"] == 55
+    assert resp.json()["erp_transaction_id"] == 1  # Mock ERP's own journal-entry id, not just Fineract's
     assert resp.json()["status"] == "Active"
     assert journal_route.call_count == 1
     posted = journal_route.calls.last.request.content

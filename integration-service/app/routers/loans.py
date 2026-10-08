@@ -2,7 +2,7 @@ import logging
 from typing import Any
 
 import httpx
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends, Request, Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -66,10 +66,11 @@ def _reuse_if_failed_scope_match(
 
 @router.post("", status_code=201)
 def create_loan_application(
-    payload: LoanApplicationCreate, response: Response, db: Session = Depends(get_db)
+    payload: LoanApplicationCreate, request: Request, response: Response, db: Session = Depends(get_db)
 ) -> dict[str, Any]:
     request_payload = payload.model_dump(mode="json")
     correlation_fields = {
+        "correlation_id": getattr(request.state, "correlation_id", None),
         "external_reference": payload.external_reference,
         "client_uid": payload.client_uid,
         "loan_reference": payload.loan_reference,
@@ -164,10 +165,9 @@ def get_loan(loan_reference: str, db: Session = Depends(get_db)) -> LoanRead:
 
 @router.post("/{loan_reference}/disburse", status_code=201)
 def disburse_loan(
-    loan_reference: str, payload: LoanDisburseRequest, response: Response, db: Session = Depends(get_db)
+    loan_reference: str, payload: LoanDisburseRequest, request: Request, response: Response, db: Session = Depends(get_db)
 ) -> dict[str, Any]:
     request_payload = payload.model_dump(mode="json")
-    correlation_fields = {"external_reference": payload.external_reference, "loan_reference": loan_reference}
 
     # scope_key=loan_reference: Part F requires disbursement be unique *per
     # loan*, independent of which external_reference arrives -- see
@@ -176,6 +176,13 @@ def disburse_loan(
         db, OperationType.LOAN_DISBURSEMENT, payload.external_reference, request_payload, scope_key=loan_reference
     )
     mapping = _loan_mapping_or_404(db, loan_reference)
+    correlation_id = getattr(request.state, "correlation_id", None)
+    correlation_fields = {
+        "correlation_id": correlation_id,
+        "external_reference": payload.external_reference,
+        "loan_reference": loan_reference,
+        "client_uid": mapping.client_uid,
+    }
 
     operation: IdempotentOperation
     if decision.is_new:
@@ -231,7 +238,7 @@ def disburse_loan(
         except httpx.TimeoutException:
             # We don't know if this landed at Fineract -- look it up by
             # externalId rather than assuming either outcome.
-            result = recover_unconfirmed_fineract_call(db, fineract, mock_erp, operation)
+            result = recover_unconfirmed_fineract_call(db, fineract, mock_erp, operation, correlation_id=correlation_id)
             response.status_code = result.status_code
             return result.body
         except FineractError as exc:
@@ -243,26 +250,33 @@ def disburse_loan(
         if transaction is None:
             # Fineract returned success but the transaction isn't visible by
             # externalId yet -- treat like the timeout path rather than crash.
-            result = recover_unconfirmed_fineract_call(db, fineract, mock_erp, operation)
+            result = recover_unconfirmed_fineract_call(db, fineract, mock_erp, operation, correlation_id=correlation_id)
             response.status_code = result.status_code
             return result.body
 
-        result = complete_fineract_leg_and_post_to_erp(db, mock_erp, operation, transaction)
+        result = complete_fineract_leg_and_post_to_erp(db, mock_erp, operation, transaction, correlation_id=correlation_id)
     finally:
         fineract.close()
         mock_erp.close()
 
     response.status_code = result.status_code
-    logger.info("loan disbursed", extra={**correlation_fields, "status": result.body.get("status")})
+    logger.info(
+        "loan disbursed",
+        extra={
+            **correlation_fields,
+            "status": result.body.get("status"),
+            "fineract_transaction_id": result.body.get("fineract_transaction_id"),
+            "erp_transaction_id": result.body.get("erp_transaction_id"),
+        },
+    )
     return result.body
 
 
 @router.post("/{loan_reference}/repayments", status_code=201)
 def repay_loan(
-    loan_reference: str, payload: LoanRepaymentRequest, response: Response, db: Session = Depends(get_db)
+    loan_reference: str, payload: LoanRepaymentRequest, request: Request, response: Response, db: Session = Depends(get_db)
 ) -> dict[str, Any]:
     request_payload = payload.model_dump(mode="json")
-    correlation_fields = {"external_reference": payload.external_reference, "loan_reference": loan_reference}
 
     # No scope_key here, deliberately -- unlike disbursement, "many legitimate
     # repayments may hit one loan" (Part F), so uniqueness is purely per
@@ -273,6 +287,13 @@ def repay_loan(
         return decision.replay_body or {}
 
     mapping = _loan_mapping_or_404(db, loan_reference)
+    correlation_id = getattr(request.state, "correlation_id", None)
+    correlation_fields = {
+        "correlation_id": correlation_id,
+        "external_reference": payload.external_reference,
+        "loan_reference": loan_reference,
+        "client_uid": mapping.client_uid,
+    }
     try:
         operation = start_operation(
             db,
@@ -303,7 +324,7 @@ def repay_loan(
             logger.warning("Fineract unreachable", extra={**correlation_fields, "status": "FAILED"})
             raise UpstreamError(f"Fineract unreachable: {exc}") from exc
         except httpx.TimeoutException:
-            result = recover_unconfirmed_fineract_call(db, fineract, mock_erp, operation)
+            result = recover_unconfirmed_fineract_call(db, fineract, mock_erp, operation, correlation_id=correlation_id)
             response.status_code = result.status_code
             return result.body
         except FineractError as exc:
@@ -313,15 +334,23 @@ def repay_loan(
 
         transaction = fineract.find_loan_transaction_by_external_id(mapping.fineract_loan_id, payload.external_reference)
         if transaction is None:
-            result = recover_unconfirmed_fineract_call(db, fineract, mock_erp, operation)
+            result = recover_unconfirmed_fineract_call(db, fineract, mock_erp, operation, correlation_id=correlation_id)
             response.status_code = result.status_code
             return result.body
 
-        result = complete_fineract_leg_and_post_to_erp(db, mock_erp, operation, transaction)
+        result = complete_fineract_leg_and_post_to_erp(db, mock_erp, operation, transaction, correlation_id=correlation_id)
     finally:
         fineract.close()
         mock_erp.close()
 
     response.status_code = result.status_code
-    logger.info("repayment applied", extra={**correlation_fields, "status": result.body.get("status")})
+    logger.info(
+        "repayment applied",
+        extra={
+            **correlation_fields,
+            "status": result.body.get("status"),
+            "fineract_transaction_id": result.body.get("fineract_transaction_id"),
+            "erp_transaction_id": result.body.get("erp_transaction_id"),
+        },
+    )
     return result.body
