@@ -1,4 +1,5 @@
 import logging
+from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy import select
@@ -109,6 +110,25 @@ def create_journal_entry(
         extra={"correlation_id": correlation_id, "external_reference": payload.external_reference, "status": "created"},
     )
     return _to_read_model(entry, code_by_account_id)
+
+
+@router.get("")
+def list_journal_entries(
+    entry_date_from: date | None = None, entry_date_to: date | None = None, db: Session = Depends(get_db)
+) -> list[JournalEntryRead]:
+    """Part K's reconciliation needs to enumerate entries over a date range,
+    not just look one up by a reference it already knows -- that's the
+    MISSING_IN_FINERACT direction (present in the ERP, absent in Fineract),
+    which only a list can answer."""
+    query = select(JournalEntry).options(selectinload(JournalEntry.lines))
+    if entry_date_from is not None:
+        query = query.where(JournalEntry.entry_date >= entry_date_from)
+    if entry_date_to is not None:
+        query = query.where(JournalEntry.entry_date <= entry_date_to)
+    entries = db.execute(query).scalars().all()
+    accounts = db.execute(select(Account)).scalars().all()
+    code_by_account_id = {a.id: a.code for a in accounts}
+    return [_to_read_model(entry, code_by_account_id) for entry in entries]
 
 
 @router.get("/{external_reference}")

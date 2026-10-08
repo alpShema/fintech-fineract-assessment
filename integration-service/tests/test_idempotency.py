@@ -2,7 +2,9 @@ from sqlalchemy.orm import Session
 
 from app.idempotency import (
     IdempotencyConflict,
+    OperationStatus,
     OperationType,
+    RaceLost,
     check_idempotency,
     complete_operation,
     start_operation,
@@ -82,6 +84,76 @@ def test_repayment_has_no_scope_key_many_legitimate_repayments_per_loan(db_sessi
 
     decision = check_idempotency(db_session, OperationType.LOAN_REPAYMENT, "REPAY-2", {"amount": 100})
     assert decision.is_new is True
+
+
+def test_start_operation_losing_the_insert_race_raises_race_lost(db_session: Session) -> None:
+    """Simulates what real concurrency does: two requests both pass
+    check_idempotency()'s is_new=True check (neither row exists yet), then
+    both call start_operation(). The first commits; the second hits the DB's
+    own unique constraint and must get RaceLost (carrying the same decision
+    check_idempotency() would have given), not an unhandled IntegrityError --
+    every router that calls start_operation() must catch this (see Part I's
+    DECISIONS.md writeup on why the DB constraint, not the pre-check, is the
+    actual enforcement layer)."""
+    start_operation(db_session, OperationType.LOAN_APPLICATION, "REF-RACE", {"a": 1})
+    try:
+        start_operation(db_session, OperationType.LOAN_APPLICATION, "REF-RACE", {"a": 1})
+        raise AssertionError("expected RaceLost")
+    except RaceLost as exc:
+        assert exc.decision.is_new is False
+        assert exc.decision.replay_status_code == 202  # the winner's row is still IN_PROGRESS at this point
+
+
+def test_start_operation_losing_the_scope_key_race_raises_race_lost(db_session: Session) -> None:
+    """Same race, but for disbursement's scope_key axis: two different
+    external_reference values racing for the same loan."""
+    start_operation(db_session, OperationType.LOAN_DISBURSEMENT, "REF-A", {"amount": 100}, scope_key="LOAN-RACE")
+    try:
+        start_operation(db_session, OperationType.LOAN_DISBURSEMENT, "REF-B", {"amount": 100}, scope_key="LOAN-RACE")
+        raise AssertionError("expected RaceLost")
+    except RaceLost as exc:
+        assert exc.decision.is_new is False
+
+
+def test_failed_disbursement_matched_via_scope_key_is_flagged_for_reuse_not_replay(db_session: Session) -> None:
+    """The bug found while verifying Part J scenario 2 live: a FAILED
+    disbursement (e.g. Fineract was unreachable) must not permanently brick
+    every future disbursement attempt for that loan just because the
+    uq_operation_scope_key constraint allows only one row per loan ever.
+    check_idempotency() itself still reports is_new=False (the row exists),
+    but matched_via="scope_key" + status FAILED is the signal the router
+    (disburse_loan) uses to repurpose the row via retry_scope_operation()
+    instead of blindly replaying the old failure forever."""
+    from app.idempotency import fail_operation
+
+    op = start_operation(db_session, OperationType.LOAN_DISBURSEMENT, "DISB-A", {"amount": 100}, scope_key="LOAN-1")
+    fail_operation(db_session, op, 503, {"error": "Fineract unreachable"})
+
+    decision = check_idempotency(db_session, OperationType.LOAN_DISBURSEMENT, "DISB-B", {"amount": 100}, scope_key="LOAN-1")
+    assert decision.is_new is False
+    assert decision.matched_via == "scope_key"
+    assert decision.operation is not None
+    assert decision.operation.status == OperationStatus.FAILED
+
+
+def test_retry_scope_operation_repurposes_the_row_for_the_new_reference(db_session: Session) -> None:
+    from app.idempotency import fail_operation, retry_scope_operation
+
+    op = start_operation(db_session, OperationType.LOAN_DISBURSEMENT, "DISB-A", {"amount": 100}, scope_key="LOAN-1")
+    fail_operation(db_session, op, 503, {"error": "Fineract unreachable"})
+
+    reused = retry_scope_operation(db_session, op, "DISB-B", {"amount": 100}, "LOAN-1", 42)
+    assert reused.external_reference == "DISB-B"
+    assert reused.status == OperationStatus.IN_PROGRESS
+    assert reused.response_status_code is None
+    assert reused.fineract_loan_id == 42
+
+    # The old reference no longer has any row of its own to find -- it was
+    # repurposed, not duplicated.
+    stale = check_idempotency(db_session, OperationType.LOAN_DISBURSEMENT, "DISB-A", {"amount": 100}, scope_key="LOAN-1")
+    assert stale.is_new is False  # finds the (now-repurposed) row via scope_key
+    assert stale.operation is not None
+    assert stale.operation.external_reference == "DISB-B"
 
 
 def test_failed_operation_replays_its_failure(db_session: Session) -> None:

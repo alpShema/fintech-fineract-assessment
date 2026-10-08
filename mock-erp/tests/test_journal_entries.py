@@ -96,3 +96,25 @@ def test_get_by_external_reference(client: TestClient) -> None:
 def test_get_unknown_reference_returns_404(client: TestClient) -> None:
     resp = client.get("/api/journal-entries/DOES-NOT-EXIST")
     assert resp.status_code == 404
+
+
+def test_list_returns_all_entries_with_no_date_filter(client: TestClient) -> None:
+    _seed_accounts(client)
+    client.post("/api/journal-entries", json=_balanced_entry(external_reference="JE-1", entry_date="2026-01-15"))
+    client.post("/api/journal-entries", json=_balanced_entry(external_reference="JE-2", entry_date="2026-02-15"))
+    resp = client.get("/api/journal-entries")
+    assert resp.status_code == 200
+    refs = {e["external_reference"] for e in resp.json()}
+    assert refs == {"JE-1", "JE-2"}
+
+
+def test_list_filters_by_date_range(client: TestClient) -> None:
+    """Part K's reconciliation needs this for MISSING_IN_FINERACT detection --
+    an ERP entry over a date range that no Fineract transaction matches."""
+    _seed_accounts(client)
+    client.post("/api/journal-entries", json=_balanced_entry(external_reference="JE-JAN", entry_date="2026-01-15"))
+    client.post("/api/journal-entries", json=_balanced_entry(external_reference="JE-FEB", entry_date="2026-02-15"))
+    resp = client.get("/api/journal-entries", params={"entry_date_from": "2026-02-01", "entry_date_to": "2026-02-28"})
+    assert resp.status_code == 200
+    refs = {e["external_reference"] for e in resp.json()}
+    assert refs == {"JE-FEB"}
