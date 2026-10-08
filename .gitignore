@@ -55,3 +55,7 @@ fineract/configuration/local-properties.env
 # Ad-hoc logs -- but evidence/ logs are required deliverables, never ignore those
 *.log
 !evidence/**
+
+
+# Personal study notes -- not part of the deliverable, never pushed
+PHASE1-NOTES.md

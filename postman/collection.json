@@ -15,7 +15,8 @@
     { "key": "baseUrl", "value": "https://localhost:8443/fineract-provider" },
     { "key": "tenantId", "value": "default" },
     { "key": "fineractUser", "value": "mifos" },
-    { "key": "fineractPassword", "value": "password" }
+    { "key": "fineractPassword", "value": "password" },
+    { "key": "glExternalRef", "value": "GL-TEST-1200" }
   ],
   "item": [
     {
@@ -87,6 +88,69 @@
               "raw": "{{baseUrl}}/api/v1/clients",
               "host": ["{{baseUrl}}"],
               "path": ["api", "v1", "clients"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Part A - GL Account external_reference sync",
+      "description": "Run these in order. 1 creates a new GL account; 2 resends the identical payload (expect HTTP 200, same resourceId, no duplicate); 3 reuses the same external_reference with a different payload (expect HTTP 409 Conflict). Change {{glExternalRef}} and the glCode in the body if you want to start fresh rather than hit the already-synced account from a previous run.",
+      "item": [
+        {
+          "name": "1. Create GL Account (new external_reference)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Fineract-Platform-TenantId", "value": "{{tenantId}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/glaccounts",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "glaccounts"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Loan Receivable\",\n  \"glCode\": \"1200-TEST\",\n  \"type\": 1,\n  \"usage\": 1,\n  \"manualEntriesAllowed\": true,\n  \"externalReference\": \"{{glExternalRef}}\"\n}"
+            }
+          }
+        },
+        {
+          "name": "2. Resend IDENTICAL payload (expect 200, same resourceId)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Fineract-Platform-TenantId", "value": "{{tenantId}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/glaccounts",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "glaccounts"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Loan Receivable\",\n  \"glCode\": \"1200-TEST\",\n  \"type\": 1,\n  \"usage\": 1,\n  \"manualEntriesAllowed\": true,\n  \"externalReference\": \"{{glExternalRef}}\"\n}"
+            }
+          }
+        },
+        {
+          "name": "3. Resend SAME reference, DIFFERENT payload (expect 409)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Fineract-Platform-TenantId", "value": "{{tenantId}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/glaccounts",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "glaccounts"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Loan Receivable CHANGED\",\n  \"glCode\": \"1200-TEST-CONFLICT\",\n  \"type\": 1,\n  \"usage\": 1,\n  \"manualEntriesAllowed\": true,\n  \"externalReference\": \"{{glExternalRef}}\"\n}"
             }
           }
         }

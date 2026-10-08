@@ -1,0 +1,127 @@
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/8.6/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+> Task :buildSrc:extractPluginRequests UP-TO-DATE
+> Task :buildSrc:generatePluginAdapters UP-TO-DATE
+> Task :buildSrc:compileJava UP-TO-DATE
+> Task :buildSrc:compileGroovy UP-TO-DATE
+> Task :buildSrc:compileGroovyPlugins UP-TO-DATE
+> Task :buildSrc:pluginDescriptors UP-TO-DATE
+> Task :buildSrc:processResources UP-TO-DATE
+> Task :buildSrc:classes UP-TO-DATE
+> Task :buildSrc:jar UP-TO-DATE
+
+> Configure project :
+The 'sonarqube' task depends on compile tasks. This behavior is now deprecated and will be removed in version 5.x. To avoid implicit compilation, set property 'sonar.gradle.skipCompile' to 'true' and make sure your project is compiled, before analysis has started.
+The 'sonar' task depends on compile tasks. This behavior is now deprecated and will be removed in version 5.x. To avoid implicit compilation, set property 'sonar.gradle.skipCompile' to 'true' and make sure your project is compiled, before analysis has started.
+matching ref: COMMIT - a022a51189e584ea8466d26c61ed1a8c568e6989
+ref configuration: COMMIT - pattern: null
+  describeTagPattern: .*(\d+\.\d+\.\d+).*
+  version: ${describe.tag.version.major}.${describe.tag.version.minor.next}.${describe.tag.version.patch}-SNAPSHOT
+
+project version: 1.11.0-SNAPSHOT
+project version: 1.11.0-SNAPSHOT
+project version: 1.11.0-SNAPSHOT
+project version: 1.11.0-SNAPSHOT
+project version: 1.11.0-SNAPSHOT
+project version: 1.11.0-SNAPSHOT
+project version: 1.11.0-SNAPSHOT
+project version: 1.11.0-SNAPSHOT
+project version: 1.11.0-SNAPSHOT
+project version: 1.11.0-SNAPSHOT
+project version: 1.11.0-SNAPSHOT
+project version: 1.11.0-SNAPSHOT
+project version: 1.11.0-SNAPSHOT
+project version: 1.11.0-SNAPSHOT
+project version: 1.11.0-SNAPSHOT
+project version: 1.11.0-SNAPSHOT
+project version: 1.11.0-SNAPSHOT
+project version: 1.11.0-SNAPSHOT
+project version: 1.11.0-SNAPSHOT
+project version: 1.11.0-SNAPSHOT
+project version: 1.11.0-SNAPSHOT
+project version: 1.11.0-SNAPSHOT
+project version: 1.11.0-SNAPSHOT
+project version: 1.11.0-SNAPSHOT
+project version: 1.11.0-SNAPSHOT
+project version: 1.11.0-SNAPSHOT
+project version: 1.11.0-SNAPSHOT
+project version: 1.11.0-SNAPSHOT
+project version: 1.11.0-SNAPSHOT
+project version: 1.11.0-SNAPSHOT
+project version: 1.11.0-SNAPSHOT
+project version: 1.11.0-SNAPSHOT
+
+> Task :spotlessInternalRegisterDependencies UP-TO-DATE
+> Task :fineract-branch:processResources UP-TO-DATE
+> Task :fineract-document:processResources UP-TO-DATE
+> Task :fineract-accounting:processResources UP-TO-DATE
+> Task :fineract-investor:processResources UP-TO-DATE
+> Task :fineract-loan:processResources UP-TO-DATE
+> Task :fineract-savings:processResources UP-TO-DATE
+> Task :fineract-core:processResources UP-TO-DATE
+> Task :fineract-client:processResources UP-TO-DATE
+> Task :fineract-avro-schemas:preprocessAvroSchemas
+> Task :fineract-provider:generateGitProperties
+> Task :fineract-provider:generateRebelMain UP-TO-DATE
+> Task :fineract-avro-schemas:spotlessJson UP-TO-DATE
+> Task :fineract-avro-schemas:spotlessJsonApply UP-TO-DATE
+> Task :fineract-avro-schemas:buildJavaSdk UP-TO-DATE
+> Task :fineract-avro-schemas:licenseFormatMain UP-TO-DATE
+> Task :fineract-avro-schemas:compileJava UP-TO-DATE
+> Task :fineract-provider:processResources UP-TO-DATE
+> Task :fineract-avro-schemas:processResources UP-TO-DATE
+> Task :fineract-avro-schemas:classes UP-TO-DATE
+> Task :fineract-provider:prepareInputYaml UP-TO-DATE
+> Task :fineract-avro-schemas:jar UP-TO-DATE
+> Task :fineract-provider:processTestResources UP-TO-DATE
+> Task :fineract-core:compileJava UP-TO-DATE
+> Task :fineract-core:classes UP-TO-DATE
+> Task :fineract-core:jar UP-TO-DATE
+> Task :fineract-accounting:compileJava UP-TO-DATE
+> Task :fineract-accounting:classes UP-TO-DATE
+> Task :fineract-accounting:jar UP-TO-DATE
+> Task :fineract-document:compileJava UP-TO-DATE
+> Task :fineract-document:classes UP-TO-DATE
+> Task :fineract-document:jar UP-TO-DATE
+> Task :fineract-branch:compileJava UP-TO-DATE
+> Task :fineract-branch:classes UP-TO-DATE
+> Task :fineract-branch:jar UP-TO-DATE
+> Task :fineract-loan:compileJava UP-TO-DATE
+> Task :fineract-loan:classes UP-TO-DATE
+> Task :fineract-loan:jar UP-TO-DATE
+> Task :fineract-savings:compileJava UP-TO-DATE
+> Task :fineract-savings:classes UP-TO-DATE
+> Task :fineract-savings:jar UP-TO-DATE
+> Task :fineract-investor:compileJava UP-TO-DATE
+> Task :fineract-investor:classes UP-TO-DATE
+> Task :fineract-investor:jar UP-TO-DATE
+> Task :fineract-provider:compileJava UP-TO-DATE
+> Task :fineract-provider:classes
+> Task :fineract-provider:compileTestJava
+> Task :fineract-provider:testClasses
+> Task :fineract-provider:resolve
+
+> Task :fineract-provider:test
+
+
+OpenJDK 64-Bit Server VM warning: Sharing is only supported for boot loader classes because bootstrap classpath has been appended
+
+> Task :fineract-provider:test
+org.apache.fineract.accounting.glaccount.service.GLAccountWritePlatformServiceJpaRepositoryImplTest
+
+  Test createGLAccount_sameExternalReferenceIdenticalPayload_returnsExistingAccountAndCreatesNoDuplicate() PASSED (20.9s)
+  Test createGLAccount_sameExternalReferenceDifferentPayload_throwsConflict() PASSED
+  Test createGLAccount_blankExternalReference_skipsIdempotencyLookupEntirely() PASSED
+
+SUCCESS: Executed 3 tests in 36.1s
+
+
+Deprecated Gradle features were used in this build, making it incompatible with Gradle 9.0.
+
+You can use '--warning-mode all' to show the individual deprecation warnings and determine if they come from your own scripts or plugins.
+
+For more on this, please refer to https://docs.gradle.org/8.6/userguide/command_line_interface.html#sec:command_line_warnings in the Gradle documentation.
+
+BUILD SUCCESSFUL in 6m 25s
+48 actionable tasks: 5 executed, 43 up-to-date
+EXIT=0

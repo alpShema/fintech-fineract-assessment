@@ -1,0 +1,54 @@
+Part A demo -- external_reference = GL-DEMO-1791444519
+----------------------------------------------------------------------
+STEP 1: initial state
+  No GL account exists yet with external_reference='GL-DEMO-1791444519'.
+----------------------------------------------------------------------
+STEP 2: request -- create GL account
+  POST https://localhost:8443/fineract-provider/api/v1/glaccounts
+  body: {"name":"Loan Receivable","glCode":"DEMO-GL-DEMO-1791444519","type":1,"usage":1,"manualEntriesAllowed":true,"externalReference":"GL-DEMO-1791444519"}
+STEP 3: response
+  HTTP 200
+  {"resourceId":2}
+STEP 4/5/6: Fineract state -- new acc_gl_account row created
+STEP 7: expected result -- a new resourceId, HTTP 200/201
+STEP 8: actual result -- HTTP 200, {"resourceId":2}
+  EXPLANATION: created successfully, resourceId=2
+----------------------------------------------------------------------
+STEP 1: initial state -- same external_reference 'GL-DEMO-1791444519' already exists (resourceId=2)
+STEP 2: request -- resend the IDENTICAL payload (simulates ERP retry / at-least-once delivery)
+  POST https://localhost:8443/fineract-provider/api/v1/glaccounts
+  body: {"name":"Loan Receivable","glCode":"DEMO-GL-DEMO-1791444519","type":1,"usage":1,"manualEntriesAllowed":true,"externalReference":"GL-DEMO-1791444519"}
+STEP 3: response
+  HTTP 200
+  {"resourceId":2}
+STEP 4/5/6: Fineract state -- must still be exactly ONE row for this external_reference
+STEP 7: expected result -- HTTP 200, same resourceId=2, no duplicate
+STEP 8: actual result -- HTTP 200, resourceId=2
+  EXPLANATION: PASS -- behavior 2 confirmed (idempotent return, no duplicate created)
+----------------------------------------------------------------------
+STEP 1: initial state -- same external_reference 'GL-DEMO-1791444519' already exists (resourceId=2)
+STEP 2: request -- same external_reference, DIFFERENT payload (conflicting reuse of the business key)
+  POST https://localhost:8443/fineract-provider/api/v1/glaccounts
+  body: {"name":"Loan Receivable CHANGED","glCode":"DEMO-GL-DEMO-1791444519-CONFLICT","type":1,"usage":1,"manualEntriesAllowed":true,"externalReference":"GL-DEMO-1791444519"}
+STEP 3: response
+  HTTP 409
+  {
+  "developerMessage" : "A GL Account with external_reference 'GL-DEMO-1791444519' already exists with a different payload than the one supplied",
+  "httpStatusCode" : "409",
+  "defaultUserMessage" : "A GL Account with external_reference 'GL-DEMO-1791444519' already exists with a different payload than the one supplied",
+  "userMessageGlobalisationCode" : "error.msg.glaccount.externalreference.conflict"
+}
+STEP 4/5/6: Fineract state -- unchanged, no second row, no mutation of the existing one
+STEP 7: expected result -- HTTP 409 Conflict
+STEP 8: actual result -- HTTP 409
+  EXPLANATION: PASS -- behavior 3 confirmed (conflicting payload rejected, not silently applied)
+----------------------------------------------------------------------
+STEP 1: initial state -- authenticated as 'mifos' (has CREATE_GLACCOUNT permission)
+STEP 2: request -- same create call, but WITHOUT credentials
+  POST https://localhost:8443/fineract-provider/api/v1/glaccounts (no Authorization header)
+STEP 3: response -- HTTP 401
+STEP 7: expected result -- HTTP 401 (rejected before our logic ever runs)
+STEP 8: actual result -- HTTP 401
+  EXPLANATION: PASS -- behavior 4 confirmed (Fineract's own permission/auth model protects this path)
+----------------------------------------------------------------------
+ALL PART A BEHAVIORS (1-4) CONFIRMED for external_reference=GL-DEMO-1791444519
