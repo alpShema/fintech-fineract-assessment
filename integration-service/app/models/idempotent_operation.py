@@ -27,9 +27,46 @@ class OperationType(str, enum.Enum):
 
 
 class OperationStatus(str, enum.Enum):
+    """Part J models the lifecycle as an explicit state machine. The brief's
+    example is RECEIVED -> FINERACT_PENDING -> FINERACT_DONE -> ERP_PENDING ->
+    COMPLETED, plus FAILED and NEEDS_RECONCILIATION. RECEIVED and
+    FINERACT_PENDING collapse into the single IN_PROGRESS value below -- there
+    is no real work done between "a request arrived" and "we're about to call
+    Fineract" in this design, so persisting them as two separate states would
+    just be two rows that always transition together. (This also means
+    IN_PROGRESS/COMPLETED/FAILED, used by every operation type since Part F,
+    didn't need to be renamed -- GL_ACCOUNT_SYNC/CLIENT_CREATE/
+    LOAN_APPLICATION only ever touch Fineract and never need the three new
+    values below; only LOAN_DISBURSEMENT/LOAN_REPAYMENT's two-leg flow does.)
+
+    Allowed transitions for LOAN_DISBURSEMENT/LOAN_REPAYMENT:
+      IN_PROGRESS -> FINERACT_DONE      (Fineract call succeeded)
+      IN_PROGRESS -> FAILED             (Fineract rejected it outright -- a
+                                         real 4xx/domain-rule violation, not a
+                                         timeout; safe to retry with a new
+                                         external_reference)
+      IN_PROGRESS -> IN_PROGRESS        (a timeout/crash with Fineract's own
+                                         outcome still unknown -- see
+                                         app/recovery.py; stays IN_PROGRESS
+                                         until either the real outcome is
+                                         found or a grace period elapses)
+      FINERACT_DONE -> ERP_PENDING      (about to post the journal entry)
+      ERP_PENDING -> COMPLETED          (ERP accepted the entry)
+      ERP_PENDING -> NEEDS_RECONCILIATION (ERP failed/timed out -- Fineract's
+                                         money movement already happened, so
+                                         this is NOT a clean "nothing
+                                         happened" failure; it needs recovery,
+                                         not a fresh retry from scratch)
+      NEEDS_RECONCILIATION -> COMPLETED (the recovery sweep's retried ERP leg
+                                         finally succeeded)
+    """
+
     IN_PROGRESS = "IN_PROGRESS"
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
+    FINERACT_DONE = "FINERACT_DONE"
+    ERP_PENDING = "ERP_PENDING"
+    NEEDS_RECONCILIATION = "NEEDS_RECONCILIATION"
 
 
 class IdempotentOperation(Base):
@@ -71,5 +108,18 @@ class IdempotentOperation(Base):
     )
     response_status_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
     response_body: Mapped[dict[str, Any] | None] = mapped_column(JsonType, nullable=True)
+
+    # Populated only for LOAN_DISBURSEMENT/LOAN_REPAYMENT -- the two-leg
+    # (Fineract then ERP) operations Part J's recovery machinery needs to
+    # find and act on without re-deriving the loan from request_payload.
+    # loan_reference/fineract_loan_id are denormalized (also derivable via
+    # LoanMapping) purely so the recovery sweep doesn't need a join per row.
+    loan_reference: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    fineract_loan_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Set the moment Fineract confirms success -- the durable fact a crash
+    # between the Fineract leg and the ERP leg (Part J scenario 5) or a
+    # stale-row recovery sweep keys off, so Fineract is never called twice.
+    fineract_transaction_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
