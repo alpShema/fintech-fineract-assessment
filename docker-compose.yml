@@ -1,8 +1,7 @@
 # fintech-fineract-assessment — docker-compose.yml
 #
-# One command starts everything: db, the customized Fineract, the Mock ERP.
-# integration-service is scaffolded (see its directory) but not wired in here
-# yet -- added once it has something to run.
+# One command starts everything: db, the customized Fineract, the Mock ERP,
+# and the Integration Service that sits between them.
 
 services:
   db:
@@ -12,6 +11,8 @@ services:
       - ./fineract/env/postgresql.env
     volumes:
       - ./fineract/postgresql-init/01-init.sh:/docker-entrypoint-initdb.d/01-init.sh:ro
+      - ./fineract/postgresql-init/02-mock-erp-init.sh:/docker-entrypoint-initdb.d/02-mock-erp-init.sh:ro
+      - ./fineract/postgresql-init/03-integration-service-init.sh:/docker-entrypoint-initdb.d/03-integration-service-init.sh:ro
       - fineract-db-data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD", "pg_isready", "-q", "-d", "postgres", "-U", "root"]
@@ -55,6 +56,30 @@ services:
       MOCK_ERP_DATABASE_URL: "postgresql+psycopg://mock_erp:mock_erp@db:5432/mock_erp"
     ports:
       - "8001:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  integration-service:
+    build:
+      context: ./integration-service
+    image: fintech-fineract-assessment/integration-service:1.0.0
+    restart: always
+    depends_on:
+      db:
+        condition: service_healthy
+      fineract:
+        condition: service_healthy
+      mock-erp:
+        condition: service_healthy
+    environment:
+      INTEGRATION_SERVICE_DATABASE_URL: "postgresql+psycopg://integration_service:integration_service@db:5432/integration_service"
+      INTEGRATION_SERVICE_FINERACT_BASE_URL: "https://fineract:8443/fineract-provider/api/v1"
+      INTEGRATION_SERVICE_MOCK_ERP_BASE_URL: "http://mock-erp:8000"
+    ports:
+      - "8002:8000"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 10s

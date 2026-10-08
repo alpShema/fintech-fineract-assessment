@@ -318,3 +318,183 @@ dependency, fresh schema per test via `StaticPool`). The actual running containe
 independently — the SQLite-vs-Postgres dialect difference is exactly what the
 bug above was about, so running the unit suite alone wouldn't have been sufficient
 proof that the conflict-detection logic is actually correct against the real database.
+
+## Parts E/F — Integration Service (Python)
+
+### One idempotency framework (`app/idempotency.py`), reused by every endpoint
+
+Five operation types exist (`GL_ACCOUNT_SYNC`, `CLIENT_CREATE`, `LOAN_APPLICATION`,
+`LOAN_DISBURSEMENT`, `LOAN_REPAYMENT`), but there is exactly one place that implements
+"new reference → process; same reference + same payload + finished → replay; same
+reference + same payload + running → 202; same reference + different payload → 409."
+Each router calls `check_idempotency()` → does its real work only if `is_new` → calls
+`complete_operation()`/`fail_operation()`. Mirrors the decision Part A made in Java
+(one `createGLAccount()` implementing the pattern once rather than four routers each
+reinventing their own version) for the identical reason: five near-identical
+implementations is five places a subtle bug (see below) could diverge or get fixed in
+only one place and not the others.
+
+### GL account sync trigger: explicit call, not a webhook or polling loop
+
+Three options were available: the Mock ERP pushes a webhook on account creation, the
+Integration Service polls the ERP's account list on a timer, or a caller explicitly
+triggers a sync (`POST /api/accounts/sync`, optionally scoped to one `account_code`).
+
+**Chosen: explicit call.** The Mock ERP (Part G) has no webhook/event mechanism at all
+— adding one would mean building push infrastructure into a service whose own brief
+never asked for it, purely to serve the Integration Service's convenience. A polling
+loop would need to track "what have I already seen" to avoid hammering Fineract with
+the same accounts every tick, which is exactly the job `GL_ACCOUNT_SYNC`'s
+`external_reference` idempotency already does — a timer would only add latency (wait
+for the next tick) and moving parts (a scheduler, start/stop lifecycle) without
+removing any of the correctness work the idempotency layer already has to do anyway.
+An explicit call keeps the same guarantee (safe to call repeatedly, each account's
+sync idempotent on its own `external_reference`) while staying synchronous and
+immediately observable — the caller's response *is* the sync result, not a
+"triggered, check back later." If a real deployment later needs this to run on a
+schedule, that's an external cron hitting the same endpoint, not a change to this
+service.
+
+### Sync retry when Fineract is down
+
+The brief is specific: "Sync status per account: SYNC_PENDING → SYNCED (or FAILED),
+with retry if Fineract is down." **Bug found and fixed while verifying this
+requirement directly against the brief** (not caught by the original test suite,
+which only ever exercised a single sync attempt per scenario): the general
+`check_idempotency()` framework's "same reference, same payload, FAILED → replay the
+real failure" branch, which is the right default for loan operations (see the section
+above on COMPLETED-replay-is-always-200 — the same logic there about not wanting a
+loan accidentally retried for a permanent business-rule rejection applies to FAILED
+loan operations too), meant a GL account sync that failed once stayed permanently
+stuck replaying that *same cached failure* forever. Calling sync again after Fineract
+came back up would never actually try again.
+
+Fixed with a new `retry_operation()` helper, used only by `_sync_one_account()`: when
+`check_idempotency()` reports an existing FAILED record for this
+`external_reference`, the router re-arms that row (`UPDATE ... SET status =
+IN_PROGRESS`, not a new INSERT — the unique constraint on `external_reference` is
+untouched) and genuinely retries the Fineract call, rather than trusting the
+generic decision's cached replay. If Fineract is back up, the retry succeeds and the
+account moves to SYNCED; if it's still down (or the failure was a genuine, permanent
+conflict — e.g. two different ERP accounts claiming the same `glCode` — not a
+transient outage), it fails again and reports the same real error, which is correct:
+retrying doesn't fix a conflict that isn't actually transient, but it does mean the
+next call tries again rather than quoting history. This is deliberately scoped to
+`GL_ACCOUNT_SYNC` only — the other four operation types keep the "replay the real
+failure" default, since silently re-attempting a loan operation Fineract already
+rejected for a business reason isn't obviously correct to do on every resend; that
+stays an opt-in choice per endpoint, not a blanket behavior change.
+
+### Payload equality via JSON round-trip, not raw object equality
+
+Stored and incoming payloads are compared via `.model_dump(mode="json")` on both sides
+rather than comparing Python objects directly. A freshly-parsed Pydantic model and one
+reloaded from the database's JSON column can differ in incidental ways (e.g. `Decimal`
+vs `str`, or a `date` object vs its ISO string) that have nothing to do with whether the
+*request* actually changed. Comparing the JSON-shaped form on both sides makes the
+conflict check about the data the caller actually sent, not about which Python type
+happened to represent it at each point.
+
+### Replay of a COMPLETED operation is always HTTP 200, never the original creation status
+
+The brief is explicit: "same reference, same payload, finished → return the original
+result (200, same body)." The *body* returned is the real original result either way,
+but the *status code* on replay is always 200 — even though the original creation was
+(for example) 201. **Bug found and fixed while building this**: the first version
+replayed `existing.response_status_code` unconditionally, so a resent loan-application
+request got back 201 twice, which reads as "created twice" to a caller even though only
+one loan was ever created in Fineract. Fixed by hardcoding 200 specifically for the
+`COMPLETED` branch; a `FAILED` operation still replays its *real* failure status (e.g.
+403/502), since claiming 200 for a failed operation would tell the caller it succeeded
+when it didn't. The fix is the same in both the external_reference branch and the
+scope_key branch of `check_idempotency()`.
+
+### Disbursement idempotency is scoped to the loan, not the external_reference
+
+Every other operation type is unique purely on `external_reference`. Disbursement adds
+a second uniqueness axis: `scope_key = loan_reference`. Reason, straight from the brief:
+"concurrent requests with different references for the same loan still result in
+exactly one Fineract disbursement." A pure `external_reference` check can't catch this
+— two genuinely different references are, by definition, not the same reference, so a
+second disbursement request with a fresh reference would sail past that check and hit
+Fineract twice. The `IdempotentOperation` table carries a second unique constraint
+(`uq_operation_scope_key`, nullable — only disbursement ever sets it) and
+`check_idempotency()` checks both axes: first by `external_reference` (catches retries
+of the literal same request), then by `scope_key` (catches a *different* request for a
+loan that's already disbursed). The scope_key hit is treated as a replay (200), not a
+409: Fineract's business reality ("this loan is disbursed") already holds, and a 409
+here would read as "you're in conflict, something needs fixing" to a retrying caller
+when the correct response is "nothing to do, it already happened." Repayment
+deliberately has **no** scope_key — unlike disbursement, many legitimate repayments
+hit one loan, so uniqueness stays purely per `external_reference` there.
+
+### Auto-approve on loan application: the brief lists no separate approve endpoint
+
+Part E's minimum endpoint list is create/get/disburse/repayments for loans — no
+standalone approve step. Rather than leave a loan stuck in `Submitted and pending
+approval` with no way to move it forward through this service's own API,
+`POST /api/loans` calls Fineract's create *and* approve in sequence before returning,
+so every loan this service creates is immediately usable for disbursement. If a real
+approval workflow (a human decision point) turns out to matter later, it is a strictly
+additive change: insert a separate approve endpoint and stop auto-approving in create,
+without touching the idempotency framework or the other three loan endpoints.
+
+### API key auth, not OAuth2/JWT
+
+A single shared `X-Api-Key` header, checked in one FastAPI dependency
+(`require_api_key`), guards every route. The brief calls the caller a "financing
+partner" integration — one known counterparty, not a multi-tenant public API with
+distinct per-user scopes or token expiry requirements. OAuth2/JWT would add a token
+issuance flow, signature verification, and expiry/refresh handling that nothing in this
+assessment's scope exercises or tests. If multiple partners or per-caller permission
+scoping become real requirements, the shared key is a single, isolated place to replace
+with a proper auth scheme — it doesn't leak into route handlers, which only ever see
+"authorized or not."
+
+**Bug found and fixed while building this**: `require_api_key` originally declared the
+header as required (`Header(...)`), which made FastAPI raise its own validation error
+(422) for a *missing* key before the function body — and therefore this app's own
+401 — ever ran. A missing key and a wrong key are the same failure from the caller's
+point of view (not authorized), so they shouldn't produce different status codes.
+Fixed by declaring the header optional (`Header(default=None)`) and checking for `None`
+manually inside the function, so both cases return a clean 401.
+
+### `client_uid`/`loan_reference` uniqueness enforced before calling Fineract, not after
+
+`POST /api/clients` checks the local `ClientMapping` table for an existing
+`client_uid` *before* ever calling Fineract — not just relying on Fineract's own
+`externalId` uniqueness to reject it after the fact. Calling Fineract first and only
+then discovering a local conflict would leave an orphaned Fineract client with no
+local mapping pointing at it. The remaining race (two concurrent requests for the same
+new `client_uid`, both passing the pre-check before either commits) is caught by the
+database's own unique constraint on `ClientMapping.client_uid`; the loser's Fineract
+client creation already happened by that point and is logged loudly as orphaned rather
+than silently swallowed — full automatic recovery from that state is Part J/K
+territory (reconciliation and failure-recovery, Tier 2), not built yet.
+
+### Account-type mapping kept in exactly one tested module
+
+The ERP's chart of accounts uses a string `type` (`ASSET`/`LIABILITY`/`EQUITY`/
+`INCOME`/`EXPENSE`); Fineract's GL accounts use an integer type code. The mapping
+(`app/account_type_mapping.py`) is a single small function with its own dedicated
+test file, confirmed against Fineract's actual source rather than guessed
+(`ASSET=1, LIABILITY=2, EQUITY=3, INCOME=4, EXPENSE=5`) — not inlined at each call
+site, since a silent off-by-one here would misclassify real accounting entries without
+any error ever being raised.
+
+### Verified against the real stack, not just mocked unit tests
+
+The unit suite (`respx`-mocked httpx calls, SQLite in-memory DB) covers the
+idempotency/conflict/replay logic in isolation and is deliberately the heaviest-weighted
+part of the test suite, matching the brief's own 20% weighting for the idempotency
+contract. Separately, `scripts/demo-part-e-f.sh` runs the full account-sync →
+client → loan-application → disburse → repay → transaction-lookup flow against the
+actual Dockerized Fineract + Mock ERP + Postgres stack through this service's own HTTP
+API, confirming the same contract holds end to end, not just against mocked
+dependencies. **Bug found this way, not by the unit suite**: replaying a previously
+`FAILED` GL account sync (`POST /api/accounts/sync` called again after a real Fineract
+rejection) returned `status: "FAILED"` but a `null` error — the per-account replay
+branch in `_sync_one_account()` populated `fineract_gl_account_id` from the stored
+result but never carried the stored `error` message across the replay path. Fixed, and
+a regression test (`test_resync_of_previously_failed_account_still_reports_error`)
+added so the unit suite would catch this specific shape of bug on its own next time.

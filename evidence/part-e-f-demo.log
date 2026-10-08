@@ -1,0 +1,108 @@
+=== Parts E/F demo -- Integration Service ===
+----------------------------------------------------------------------
+STEP 1: health check
+{"status":"UP"}
+----------------------------------------------------------------------
+STEP 2: sync the ERP's chart of accounts into Fineract (GL_ACCOUNT_SYNC)
+{
+    "results": [
+        {
+            "code": "1100",
+            "external_reference": "GL-1100",
+            "status": "SYNCED",
+            "fineract_gl_account_id": 5,
+            "error": null
+        },
+        {
+            "code": "1200",
+            "external_reference": "GL-1200",
+            "status": "SYNCED",
+            "fineract_gl_account_id": 6,
+            "error": null
+        },
+        {
+            "code": "4000",
+            "external_reference": "GL-4000",
+            "status": "SYNCED",
+            "fineract_gl_account_id": 7,
+            "error": null
+        },
+        {
+            "code": "5000",
+            "external_reference": "GL-5000-DEMO",
+            "status": "FAILED",
+            "fineract_gl_account_id": null,
+            "error": "{'developerMessage': 'The request caused a data integrity issue to be fired by the database.', 'httpStatusCode': '403', 'defaultUserMessage': 'Unknown data integrity issue with resource GL Account: ERROR: duplicate key value violates unique constraint \"acc_gl_account_gl_code_key\"\\n  Detail: Key (gl_code)=(5000) already exists.', 'userMessageGlobalisationCode': 'error.msg.glAccount.unknown.data.integrity.issue', 'errors': [{'developerMessage': 'Unknown data integrity issue with resource GL Account: ERROR: duplicate key value violates unique constraint \"acc_gl_account_gl_code_key\"\\n  Detail: Key (gl_code)=(5000) already exists.', 'defaultUserMessage': 'Unknown data integrity issue with resource GL Account: ERROR: duplicate key value violates unique constraint \"acc_gl_account_gl_code_key\"\\n  Detail: Key (gl_code)=(5000) already exists.', 'userMessageGlobalisationCode': 'error.msg.glAccount.unknown.data.integrity.issue', 'args': []}]}"
+        }
+    ]
+}
+----------------------------------------------------------------------
+STEP 3: resync -- expect the SAME results, zero new Fineract GL accounts created
+{
+    "results": [
+        {
+            "code": "1100",
+            "external_reference": "GL-1100",
+            "status": "SYNCED",
+            "fineract_gl_account_id": 5,
+            "error": null
+        },
+        {
+            "code": "1200",
+            "external_reference": "GL-1200",
+            "status": "SYNCED",
+            "fineract_gl_account_id": 6,
+            "error": null
+        },
+        {
+            "code": "4000",
+            "external_reference": "GL-4000",
+            "status": "SYNCED",
+            "fineract_gl_account_id": 7,
+            "error": null
+        },
+        {
+            "code": "5000",
+            "external_reference": "GL-5000-DEMO",
+            "status": "FAILED",
+            "fineract_gl_account_id": null,
+            "error": "{'developerMessage': 'The request caused a data integrity issue to be fired by the database.', 'httpStatusCode': '403', 'defaultUserMessage': 'Unknown data integrity issue with resource GL Account: ERROR: duplicate key value violates unique constraint \"acc_gl_account_gl_code_key\"\\n  Detail: Key (gl_code)=(5000) already exists.', 'userMessageGlobalisationCode': 'error.msg.glAccount.unknown.data.integrity.issue', 'errors': [{'developerMessage': 'Unknown data integrity issue with resource GL Account: ERROR: duplicate key value violates unique constraint \"acc_gl_account_gl_code_key\"\\n  Detail: Key (gl_code)=(5000) already exists.', 'defaultUserMessage': 'Unknown data integrity issue with resource GL Account: ERROR: duplicate key value violates unique constraint \"acc_gl_account_gl_code_key\"\\n  Detail: Key (gl_code)=(5000) already exists.', 'userMessageGlobalisationCode': 'error.msg.glAccount.unknown.data.integrity.issue', 'args': []}]}"
+        }
+    ]
+}
+----------------------------------------------------------------------
+STEP 4: create client (external_reference REF-DEMO-CLIENT-1791465502, client_uid SME-DEMO-1791465502)
+response: {"client_uid":"SME-DEMO-1791465502","status":"Active","display_name":"Demo Borrower"}
+HTTP 201 (expect 201, created)
+----------------------------------------------------------------------
+STEP 5: resend IDENTICAL client create (expect 200 replay, no second Fineract client)
+response: {"status":"Active","client_uid":"SME-DEMO-1791465502","display_name":"Demo Borrower"}
+HTTP 200 (expect 200)
+----------------------------------------------------------------------
+STEP 6: get client by client_uid
+{"client_uid":"SME-DEMO-1791465502","status":"Active","display_name":"Demo Borrower"}
+----------------------------------------------------------------------
+STEP 7: create + auto-approve loan application (loan_reference LN-DEMO-1791465502)
+{"loan_reference":"LN-DEMO-1791465502","status":"Approved"}
+----------------------------------------------------------------------
+STEP 8: get loan (expect Approved)
+{"loan_reference":"LN-DEMO-1791465502","status":"Approved","principal_outstanding":null,"total_outstanding":null}
+----------------------------------------------------------------------
+STEP 9: disburse loan
+response: {"loan_reference":"LN-DEMO-1791465502","status":"Active","fineract_transaction_id":31}
+HTTP 201 (expect 201)
+----------------------------------------------------------------------
+STEP 10: re-disburse with a DIFFERENT external_reference, same loan -- the brief's exact scenario
+response: {"status":"Active","loan_reference":"LN-DEMO-1791465502","fineract_transaction_id":31}
+HTTP 200 (expect 200 replay, same fineract_transaction_id as step 9 -- exactly one Fineract disbursement)
+----------------------------------------------------------------------
+STEP 11: repay loan
+{"loan_reference":"LN-DEMO-1791465502","status":"Accepted","fineract_transaction_id":33}
+----------------------------------------------------------------------
+STEP 12: get loan after repayment (expect reduced outstanding)
+{"loan_reference":"LN-DEMO-1791465502","status":"Active","principal_outstanding":"923320.0","total_outstanding":"1000161.0"}
+----------------------------------------------------------------------
+STEP 13: look up a transaction by external_reference (searches across all operation types)
+{"external_reference":"REF-DEMO-LOAN-1791465502","operation_type":"LOAN_APPLICATION","status":"COMPLETED","result":{"status":"Approved","loan_reference":"LN-DEMO-1791465502"}}
+----------------------------------------------------------------------
+PARTS E/F DEMO COMPLETE

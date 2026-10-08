@@ -25,7 +25,11 @@
     { "key": "clientId", "value": "" },
     { "key": "loanId", "value": "" },
     { "key": "mockErpBaseUrl", "value": "http://localhost:8001" },
-    { "key": "txnExternalRef", "value": "TXN-POSTMAN-001" }
+    { "key": "txnExternalRef", "value": "TXN-POSTMAN-001" },
+    { "key": "integrationServiceBaseUrl", "value": "http://localhost:8002" },
+    { "key": "integrationServiceApiKey", "value": "integration-service-partner-key" },
+    { "key": "intSvcClientUid", "value": "SME-INTSVC-001" },
+    { "key": "intSvcLoanReference", "value": "LN-INTSVC-001" }
   ],
   "item": [
     {
@@ -599,6 +603,204 @@
               "host": ["{{mockErpBaseUrl}}"],
               "path": ["api", "accounts", "1100", "balance"]
             }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Part E+F - Integration Service",
+      "description": "Runs on its own base URL ({{integrationServiceBaseUrl}}), bridging Mock ERP and Fineract. Every write endpoint carries the external_reference idempotency contract (Part F): new reference -> process; same reference + identical payload -> replay the original result (always HTTP 200, even though the original create was 201); same reference + different payload -> 409. Run in order -- loan steps depend on the client created in step 3.",
+      "auth": {
+        "type": "apikey",
+        "apikey": [
+          { "key": "key", "value": "X-Api-Key", "type": "string" },
+          { "key": "value", "value": "{{integrationServiceApiKey}}", "type": "string" },
+          { "key": "in", "value": "header", "type": "string" }
+        ]
+      },
+      "item": [
+        {
+          "name": "0. Health Check",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{integrationServiceBaseUrl}}/health", "host": ["{{integrationServiceBaseUrl}}"], "path": ["health"] },
+            "auth": { "type": "noauth" }
+          }
+        },
+        {
+          "name": "1. Sync All GL Accounts from Mock ERP (expect SYNCED)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{integrationServiceBaseUrl}}/api/accounts/sync",
+              "host": ["{{integrationServiceBaseUrl}}"],
+              "path": ["api", "accounts", "sync"]
+            },
+            "body": { "mode": "raw", "raw": "{}" },
+            "description": "account_code is optional -- {} (empty body) syncs every account currently in the Mock ERP's chart of accounts. To sync just one, send {\"account_code\": \"1100\"} instead."
+          }
+        },
+        {
+          "name": "2. Resync (idempotent -- same accounts, no duplicate Fineract GL accounts)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{integrationServiceBaseUrl}}/api/accounts/sync",
+              "host": ["{{integrationServiceBaseUrl}}"],
+              "path": ["api", "accounts", "sync"]
+            },
+            "body": { "mode": "raw", "raw": "{}" }
+          }
+        },
+        {
+          "name": "3. Create Client (client_uid as the stable business key)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{integrationServiceBaseUrl}}/api/clients",
+              "host": ["{{integrationServiceBaseUrl}}"],
+              "path": ["api", "clients"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"external_reference\": \"REF-INTSVC-CLIENT-1\",\n  \"client_uid\": \"{{intSvcClientUid}}\",\n  \"firstname\": \"Jean\",\n  \"lastname\": \"Mugisha\"\n}"
+            }
+          }
+        },
+        {
+          "name": "4. Resend IDENTICAL Client Create (expect 200 replay, no new Fineract client)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{integrationServiceBaseUrl}}/api/clients",
+              "host": ["{{integrationServiceBaseUrl}}"],
+              "path": ["api", "clients"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"external_reference\": \"REF-INTSVC-CLIENT-1\",\n  \"client_uid\": \"{{intSvcClientUid}}\",\n  \"firstname\": \"Jean\",\n  \"lastname\": \"Mugisha\"\n}"
+            }
+          }
+        },
+        {
+          "name": "5. Get Client by client_uid",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{integrationServiceBaseUrl}}/api/clients/{{intSvcClientUid}}",
+              "host": ["{{integrationServiceBaseUrl}}"],
+              "path": ["api", "clients", "{{intSvcClientUid}}"]
+            }
+          }
+        },
+        {
+          "name": "6. Create Loan Application (auto-approves -- see DECISIONS.md)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{integrationServiceBaseUrl}}/api/loans", "host": ["{{integrationServiceBaseUrl}}"], "path": ["api", "loans"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"external_reference\": \"REF-INTSVC-LOAN-1\",\n  \"client_uid\": \"{{intSvcClientUid}}\",\n  \"loan_reference\": \"{{intSvcLoanReference}}\",\n  \"principal\": \"1000000\",\n  \"expected_disbursement_date\": \"2026-10-08\"\n}"
+            }
+          }
+        },
+        {
+          "name": "7. Get Loan (expect Approved)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{integrationServiceBaseUrl}}/api/loans/{{intSvcLoanReference}}",
+              "host": ["{{integrationServiceBaseUrl}}"],
+              "path": ["api", "loans", "{{intSvcLoanReference}}"]
+            }
+          }
+        },
+        {
+          "name": "8. Disburse Loan",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{integrationServiceBaseUrl}}/api/loans/{{intSvcLoanReference}}/disburse",
+              "host": ["{{integrationServiceBaseUrl}}"],
+              "path": ["api", "loans", "{{intSvcLoanReference}}", "disburse"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"external_reference\": \"REF-INTSVC-DISB-1\",\n  \"actual_disbursement_date\": \"2026-10-08\"\n}"
+            }
+          }
+        },
+        {
+          "name": "9. Re-disburse with a DIFFERENT external_reference (expect 200 replay, scope_key=loan keeps it to one Fineract disbursement)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{integrationServiceBaseUrl}}/api/loans/{{intSvcLoanReference}}/disburse",
+              "host": ["{{integrationServiceBaseUrl}}"],
+              "path": ["api", "loans", "{{intSvcLoanReference}}", "disburse"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"external_reference\": \"REF-INTSVC-DISB-1-RETRY\",\n  \"actual_disbursement_date\": \"2026-10-08\"\n}"
+            }
+          }
+        },
+        {
+          "name": "10. Repay Loan",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{integrationServiceBaseUrl}}/api/loans/{{intSvcLoanReference}}/repayments",
+              "host": ["{{integrationServiceBaseUrl}}"],
+              "path": ["api", "loans", "{{intSvcLoanReference}}", "repayments"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"external_reference\": \"REF-INTSVC-REPAY-1\",\n  \"transaction_date\": \"2026-10-08\",\n  \"transaction_amount\": \"100000\"\n}"
+            }
+          }
+        },
+        {
+          "name": "11. Get Loan After Repayment (expect reduced outstanding)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{integrationServiceBaseUrl}}/api/loans/{{intSvcLoanReference}}",
+              "host": ["{{integrationServiceBaseUrl}}"],
+              "path": ["api", "loans", "{{intSvcLoanReference}}"]
+            }
+          }
+        },
+        {
+          "name": "12. Get Transaction by external_reference (searches across all operation types)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{integrationServiceBaseUrl}}/api/transactions/REF-INTSVC-LOAN-1",
+              "host": ["{{integrationServiceBaseUrl}}"],
+              "path": ["api", "transactions", "REF-INTSVC-LOAN-1"]
+            }
+          }
+        },
+        {
+          "name": "13. Reconciliation (stub -- Part K, Tier 2, not yet implemented)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{integrationServiceBaseUrl}}/api/reconciliation",
+              "host": ["{{integrationServiceBaseUrl}}"],
+              "path": ["api", "reconciliation"]
+            },
+            "body": { "mode": "raw", "raw": "{}" }
           }
         }
       ]

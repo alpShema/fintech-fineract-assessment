@@ -62,3 +62,14 @@ PHASE1-NOTES.md
 PHASE2-NOTES.md
 PHASE3-NOTES.md
 PHASE4-NOTES.md
+
+# VSCode Postman extension's local workspace sync -- regenerated tooling
+# state, not project content. Only postman/collection.json is the deliverable.
+.postman/
+postman/collections/
+postman/documents/
+postman/environments/
+postman/flows/
+postman/globals/
+postman/mocks/
+postman/specs/
