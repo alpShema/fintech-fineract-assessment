@@ -100,6 +100,32 @@ scope"). `GLAccount.update()` was deliberately left untouched — it has no awar
 cannot change a reference once set. This wasn't an oversight; it keeps the one external
 mutation path (create) as the only place this invariant needs to be reasoned about.
 
+### Bug found and fixed: blank `external_reference` must become `NULL`, not `""`
+
+Found while building Part B (creating Fineract-only GL accounts, like the loan
+write-off/overpayment mapping accounts, that intentionally have no ERP
+`external_reference`): Fineract's `JsonCommand.stringValueOfParameterNamed(...)`
+returns `""` (empty string), not `null`, when the JSON field is absent entirely. Our
+original `GLAccount.fromJson(...)` set whatever came back unconditionally, so **every**
+GL account created without an `external_reference` ended up with `external_reference =
+''` in the database — and since an empty string is a real, DB-comparable value (unlike
+`NULL`, which `UNIQUE` constraints exempt from collision), creating a *second* such
+account violated `uq_acc_gl_account_external_reference` against the first one. This
+silently limited the entire database to one externally-unreferenced GL account ever
+existing — a real correctness bug, not a hypothetical one (reproduced creating the
+Part B write-off and overpayment GL accounts: the second one failed with our own 409).
+
+Fixed by normalizing blank to `null` before setting the entity field:
+```java
+final String externalReferenceRaw = command.stringValueOfParameterNamed(EXTERNAL_REFERENCE.getValue());
+final String externalReference = StringUtils.isBlank(externalReferenceRaw) ? null : externalReferenceRaw;
+```
+This is exactly the kind of gap unit tests with mocked `JsonCommand` stubs can't catch
+on their own (our mocks return `null` directly, by our own choice, when a test wants
+"absent") — it only surfaced testing against the **real** Fineract JSON parsing layer,
+via the Part B integration work. Re-confirms why the integration test (and the Docker
+rebuild + real `docker compose up` demo) are required evidence, not just nice-to-haves.
+
 ### Known weaknesses / what wasn't built
 
 - **No distinction between "identical payload" and "same payload but caller forgot
@@ -115,3 +141,73 @@ mutation path (create) as the only place this invariant needs to be reasoned abo
 - Sync-vs-async, retries, and partial-failure handling for the **Python side** of GL
   account sync (Part A's other half) aren't decided yet — those entries get added here
   once the Integration Service is built.
+
+## Part B — Fineract environment configuration
+
+### Accounting rule: cash-based
+
+`accountingRule=2` (CASH_BASED) on the loan product. Journal entries post when cash
+actually moves (disbursement, repayment), not when interest accrues. Chosen over
+accrual because: (a) it's simpler to reason about and demonstrate end-to-end in the
+time available, (b) it matches the brief's own suggested mapping in Part H exactly
+("Disbursement: DR Loan Receivable / CR Bank" — a cash-movement-triggered entry, not an
+accrual schedule), and (c) accrual accounting would require also deciding and building
+a periodic accrual job, which is out of scope for what this assessment is actually
+evaluating (GL sync correctness and idempotency, not accounting-period mechanics).
+
+### Why the loan product needs 5 GL accounts, not 3
+
+Part A only requires 3 ERP-synced accounts (Bank, Loan Receivable, Interest Income —
+matching Part G's suggested chart of accounts: 1100/1200/4000). But Fineract's loan
+product creation API *validates* that `writeOffAccountId` (expense) and
+`overpaymentLiabilityAccountId` (liability) are present and of the correct account
+*type*, even though fees/penalties/write-off/overpayment are explicitly out of scope
+per the brief. Two more GL accounts were added purely to satisfy this structural
+validation: "Loan Losses Written Off" (expense, glCode 5000) and "Loan Overpayments"
+(liability, glCode 2100). **These two are deliberately not ERP-synced** (no
+`external_reference`) — they're Fineract-only bookkeeping placeholders that exist to
+make the product creation API happy, not part of the ERP's chart of accounts. Discovered
+by attempting creation and reading Fineract's own validation errors rather than
+guessing the full required field set upfront.
+
+### Least-privilege API user: exactly 10 permissions, nothing else
+
+Role "Integration Service" (id 3) is granted precisely: `CREATE_GLACCOUNT`,
+`READ_GLACCOUNT` (Part A sync), `CREATE_CLIENT`, `READ_CLIENT`, `ACTIVATE_CLIENT`
+(Part C), `CREATE_LOAN`, `READ_LOAN`, `APPROVE_LOAN`, `DISBURSE_LOAN`, `REPAYMENT_LOAN`
+(Part D). No user/role management, no organisation-wide configuration, no permissions
+for any other product type. Verified by proving both directions: a granted action
+(`GET /clients` → 200) succeeds, and an ungranted action (`POST /users` → 403, "User has
+no authority to: CREATE_USER") is rejected — not just that *something* works, but that
+the boundary is where it's supposed to be.
+
+**Bug found and fixed while setting this up**: `PUT /roles/{id}/permissions` rejects a
+payload grouped by category (`{"accounting": {...}, "portfolio": {...}}` — which is how
+`GET /roles/{id}/permissions` *displays* them) with "parameter accounting is not
+supported." It wants a single flat `{"permissions": {"CODE": true, ...}}` object. The
+first attempt at this *looked* like it succeeded (the script piped the response to
+`/dev/null` and didn't check it), silently granting **zero** permissions — caught only
+by then explicitly testing that a granted action actually worked, which it didn't,
+which is what led to checking `GET /roles/{id}/permissions` and finding nothing selected.
+Lesson applied: the setup script's permission-grant step now checks the response for a
+`resourceId` and fails loudly if it's not there, instead of discarding it.
+
+### Office and currency
+
+"Kigali Main Office" created as a child of the default "Head Office" (not a
+replacement for it — Fineract always seeds Head Office, and there's no reason to
+delete it). RWF enabled via `PUT /currencies` alongside the default USD (not replacing
+USD, since Fineract requires at least one currency and removing USD isn't necessary for
+this scenario to work).
+
+### Loan product parameters
+
+18% per year (`interestRateFrequencyType=3`), declining-balance interest
+(`interestType=0` — more realistic for an asset-finance product than flat interest),
+equal installments (`amortizationType=1`), 12 monthly repayments
+(`repaymentFrequencyType=2`), single disbursement (`multiDisburseLoan=false`, per the
+brief's explicit "no multi-tranche"), principal range 500,000–20,000,000 RWF with a
+default of 5,000,000 (matching the brief's own suggested Part D loan amount), standard
+`mifos-standard-strategy` transaction processing order (penalties/fees/interest/
+principal — not actually exercised since fees/penalties are out of scope, but it's
+Fineract's own default and changing it wasn't warranted).

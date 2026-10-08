@@ -16,7 +16,10 @@
     { "key": "tenantId", "value": "default" },
     { "key": "fineractUser", "value": "mifos" },
     { "key": "fineractPassword", "value": "password" },
-    { "key": "glExternalRef", "value": "GL-TEST-1200" }
+    { "key": "glExternalRef", "value": "GL-TEST-1200" },
+    { "key": "integrationServiceUser", "value": "integration-service" },
+    { "key": "integrationServicePassword", "value": "IntegrationService!2024" },
+    { "key": "integrationRoleId", "value": "3" }
   ],
   "item": [
     {
@@ -151,6 +154,85 @@
             "body": {
               "mode": "raw",
               "raw": "{\n  \"name\": \"Loan Receivable CHANGED\",\n  \"glCode\": \"1200-TEST-CONFLICT\",\n  \"type\": 1,\n  \"usage\": 1,\n  \"manualEntriesAllowed\": true,\n  \"externalReference\": \"{{glExternalRef}}\"\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Part B - Environment setup",
+      "description": "Verify what scripts/setup-fineract-environment.sh created, then prove the least-privilege API user actually is least-privilege (both directions).",
+      "item": [
+        {
+          "name": "1. List Offices (expect Head Office + Kigali Main Office)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Fineract-Platform-TenantId", "value": "{{tenantId}}" }],
+            "url": { "raw": "{{baseUrl}}/api/v1/offices", "host": ["{{baseUrl}}"], "path": ["api", "v1", "offices"] }
+          }
+        },
+        {
+          "name": "1b. List Users (expect mifos + integration-service)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Fineract-Platform-TenantId", "value": "{{tenantId}}" }],
+            "url": { "raw": "{{baseUrl}}/api/v1/users", "host": ["{{baseUrl}}"], "path": ["api", "v1", "users"] }
+          }
+        },
+        {
+          "name": "2. List Loan Products (expect SME Asset Finance)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Fineract-Platform-TenantId", "value": "{{tenantId}}" }],
+            "url": { "raw": "{{baseUrl}}/api/v1/loanproducts", "host": ["{{baseUrl}}"], "path": ["api", "v1", "loanproducts"] }
+          }
+        },
+        {
+          "name": "3. Check Role Permissions (expect exactly 10 selected)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Fineract-Platform-TenantId", "value": "{{tenantId}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/roles/{{integrationRoleId}}/permissions",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "roles", "{{integrationRoleId}}", "permissions"]
+            }
+          }
+        },
+        {
+          "name": "4. As integration-service: List Clients (expect 200, granted)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Fineract-Platform-TenantId", "value": "{{tenantId}}" }],
+            "url": { "raw": "{{baseUrl}}/api/v1/clients", "host": ["{{baseUrl}}"], "path": ["api", "v1", "clients"] },
+            "auth": {
+              "type": "basic",
+              "basic": [
+                { "key": "username", "value": "{{integrationServiceUser}}", "type": "string" },
+                { "key": "password", "value": "{{integrationServicePassword}}", "type": "string" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "5. As integration-service: Create User (expect 403, NOT granted)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Fineract-Platform-TenantId", "value": "{{tenantId}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": { "raw": "{{baseUrl}}/api/v1/users", "host": ["{{baseUrl}}"], "path": ["api", "v1", "users"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"should-fail\",\n  \"firstname\": \"x\",\n  \"lastname\": \"y\",\n  \"officeId\": 1,\n  \"roles\": [1],\n  \"sendPasswordToEmail\": false,\n  \"password\": \"Test1234!\",\n  \"repeatPassword\": \"Test1234!\"\n}"
+            },
+            "auth": {
+              "type": "basic",
+              "basic": [
+                { "key": "username", "value": "{{integrationServiceUser}}", "type": "string" },
+                { "key": "password", "value": "{{integrationServicePassword}}", "type": "string" }
+              ]
             }
           }
         }

@@ -1,0 +1,42 @@
+=== Part B: Fineract environment setup ===
+----------------------------------------------------------------------
+1. Enabling RWF currency...
+   done.
+----------------------------------------------------------------------
+2. Creating GL accounts (Bank, Loan Receivable, Interest Income) via Part A sync endpoint...
+   Bank=5, Loan Receivable=6, Interest Income=7, Write-off=10, Overpayment=11
+----------------------------------------------------------------------
+3. Creating office 'Kigali Main Office'...
+   already exists as id=2, skipping
+----------------------------------------------------------------------
+4. Creating loan product 'SME Asset Finance'...
+   already exists as id=1, skipping
+----------------------------------------------------------------------
+5. Creating least-privilege role + API user for the Integration Service...
+   role already exists as id=3, skipping role creation
+   user 'integration-service' already exists as id=4, skipping
+----------------------------------------------------------------------
+Part B setup complete.
+  Office: Kigali Main Office (id=2)
+  Loan product: SME Asset Finance (id=1)
+  GL accounts: Bank=5, Loan Receivable=6, Interest Income=7
+  Role: Integration Service (id=3), User: integration-service (id=4)
+
+--- Least-privilege verification ---
+Permitted (READ_CLIENT -> list clients):
+{"totalFilteredRecords":0,"pageItems":[]}HTTP 200
+
+Forbidden (CREATE_USER, not granted to this role):
+{
+  "developerMessage" : "The user associated with credentials passed on this request does not have sufficient privileges to perform this action.",
+  "httpStatusCode" : "403",
+  "defaultUserMessage" : "Insufficient privileges to perform this action.",
+  "userMessageGlobalisationCode" : "error.msg.not.authorized",
+  "errors" : [ {
+    "developerMessage" : "User has no authority to: CREATE_USER",
+    "defaultUserMessage" : "User has no authority to: CREATE_USER",
+    "userMessageGlobalisationCode" : "error.msg.not.authorized",
+    "parameterName" : "id",
+    "args" : [ ]
+  } ]
+}HTTP 403
