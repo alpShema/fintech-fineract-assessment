@@ -9,12 +9,32 @@ from app.auth import require_api_key
 from app.clients.fineract import FineractClient, FineractError
 from app.clients.mock_erp import MockErpClient
 from app.db.session import get_db
-from app.idempotency import check_idempotency, complete_operation, fail_operation, retry_operation, start_operation
+from app.idempotency import (
+    IdempotencyDecision,
+    RaceLost,
+    check_idempotency,
+    complete_operation,
+    fail_operation,
+    retry_operation,
+    start_operation,
+)
 from app.models.idempotent_operation import IdempotentOperation, OperationStatus, OperationType
 from app.schemas.account_sync import AccountSyncRequest, AccountSyncResponse, AccountSyncResult
 
 router = APIRouter(prefix="/api/accounts", tags=["accounts"], dependencies=[Depends(require_api_key)])
 logger = logging.getLogger(__name__)
+
+
+def _result_from_decision(code: str, external_reference: str, decision: IdempotencyDecision) -> AccountSyncResult:
+    body = decision.replay_body or {}
+    is_synced = decision.replay_status_code in (200, 201)
+    return AccountSyncResult(
+        code=code,
+        external_reference=external_reference,
+        status="SYNCED" if is_synced else "FAILED",
+        fineract_gl_account_id=body.get("resourceId") if is_synced else None,
+        error=None if is_synced else body.get("error"),
+    )
 
 
 def _sync_one_account(db: Session, fineract: FineractClient, erp_account: dict[str, Any]) -> AccountSyncResult:
@@ -33,22 +53,17 @@ def _sync_one_account(db: Session, fineract: FineractClient, erp_account: dict[s
     decision = check_idempotency(db, OperationType.GL_ACCOUNT_SYNC, external_reference, fineract_payload)
     operation: IdempotentOperation
     if decision.is_new:
-        operation = start_operation(db, OperationType.GL_ACCOUNT_SYNC, external_reference, fineract_payload)
+        try:
+            operation = start_operation(db, OperationType.GL_ACCOUNT_SYNC, external_reference, fineract_payload)
+        except RaceLost as exc:
+            return _result_from_decision(code, external_reference, exc.decision)
     elif decision.operation is not None and decision.operation.status == OperationStatus.FAILED:
         # A previous attempt failed (e.g. Fineract was down) -- retry for
         # real rather than replaying that same cached failure forever.
         operation = decision.operation
         retry_operation(db, operation)
     else:
-        body = decision.replay_body or {}
-        is_synced = decision.replay_status_code in (200, 201)
-        return AccountSyncResult(
-            code=code,
-            external_reference=external_reference,
-            status="SYNCED" if is_synced else "FAILED",
-            fineract_gl_account_id=body.get("resourceId") if is_synced else None,
-            error=None if is_synced else body.get("error"),
-        )
+        return _result_from_decision(code, external_reference, decision)
 
     try:
         result = fineract.create_gl_account(fineract_payload)

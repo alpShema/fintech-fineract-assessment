@@ -12,7 +12,7 @@ from app.clients.fineract import FineractClient, FineractError
 from app.db.session import get_db
 from app.exceptions import ConflictError, NotFoundError, UpstreamError
 from app.fineract_dates import FINERACT_DATE_FORMAT, format_fineract_date
-from app.idempotency import check_idempotency, complete_operation, fail_operation, start_operation
+from app.idempotency import RaceLost, check_idempotency, complete_operation, fail_operation, start_operation
 from app.models.idempotent_operation import OperationType
 from app.models.mapping import ClientMapping
 from app.schemas.client import ClientCreate, ClientRead
@@ -45,7 +45,11 @@ def create_client(payload: ClientCreate, response: Response, db: Session = Depen
     if existing_mapping is not None:
         raise ConflictError(f"client_uid '{payload.client_uid}' is already in use by another client")
 
-    operation = start_operation(db, OperationType.CLIENT_CREATE, payload.external_reference, request_payload)
+    try:
+        operation = start_operation(db, OperationType.CLIENT_CREATE, payload.external_reference, request_payload)
+    except RaceLost as exc:
+        response.status_code = exc.decision.replay_status_code or 200
+        return exc.decision.replay_body or {}
 
     fineract_payload = {
         "officeId": FINERACT_OFFICE_ID,
