@@ -788,3 +788,138 @@ amount (`AMOUNT_MISMATCH`). The live report returned all four statuses correctly
 alongside ~70 genuinely `MATCHED` entries accumulated from the rest of this session's
 live testing — itself a small extra proof that the matching logic holds up against
 real accumulated state, not just a hand-picked small fixture.
+
+## Observability: "What happened to FIN-2026000001?"
+
+This is the brief's own worked example (Section 9), answered for real rather than
+illustrated: a live disbursement was sent with `external_reference: "FIN-2026000001"`
+and a caller-supplied `X-Correlation-Id: trace-fin-2026000001-demo` against the
+running stack. Two structured JSON log lines came back (reformatted here for
+readability; the real output is single-line JSON):
+
+```json
+{"timestamp": "2026-10-08T16:31:07.157786+00:00", "level": "INFO",
+ "message": "two-leg operation completed", "logger": "app.recovery",
+ "correlation_id": "trace-fin-2026000001-demo", "external_reference": "FIN-2026000001",
+ "loan_reference": "LN-OBS-1791477056", "fineract_transaction_id": 182,
+ "erp_transaction_id": 106, "status": "COMPLETED"}
+
+{"timestamp": "2026-10-08T16:31:07.158494+00:00", "level": "INFO",
+ "message": "loan disbursed", "logger": "app.routers.loans",
+ "correlation_id": "trace-fin-2026000001-demo", "external_reference": "FIN-2026000001",
+ "client_uid": "SME-OBS-1791477056", "loan_reference": "LN-OBS-1791477056",
+ "fineract_transaction_id": 182, "erp_transaction_id": 106, "status": "Active"}
+```
+
+And the one API call, `GET /api/transactions/FIN-2026000001`:
+
+```json
+{
+  "external_reference": "FIN-2026000001",
+  "operation_type": "LOAN_DISBURSEMENT",
+  "status": "COMPLETED",
+  "result": {
+    "status": "Active",
+    "loan_reference": "LN-OBS-1791477056",
+    "erp_transaction_id": 106,
+    "fineract_transaction_id": 182
+  }
+}
+```
+
+An engineer answers the question entirely from this: the operation **completed**
+(not stuck, not failed); it resolved to Fineract loan `LN-OBS-1791477056`'s
+transaction `182` and ERP journal entry `106` — the two numbers needed to go look at
+either ledger directly without ever having to guess or cross-reference by hand; the
+`client_uid` (`SME-OBS-1791477056`) identifies whose loan this was without exposing
+any Fineract-internal id as part of the lookup; and `correlation_id` is what lets this
+exact request be found again in infrastructure-level logs (a load balancer, an APM
+trace) that know nothing about `external_reference` at all — the two ids serve
+different audiences (business/support vs. infra/on-call) and this is why both exist
+side by side rather than one replacing the other.
+
+**How this got built**: `app/logging_config.py`'s `JsonFormatter` declared all seven
+required fields from the start, but most log call sites weren't actually populating
+them — found by checking the repo against this exact section of the brief rather than
+assuming the formatter's existence meant the job was done. `correlation_id` was
+attached to response headers and error bodies but never to a single log line (zero
+matches searching every router); `erp_transaction_id` was never captured at all
+(`app/recovery.py`'s `_post_to_erp()` discarded Mock ERP's response entirely);
+`client_uid` and `fineract_transaction_id` were missing from the disbursement/
+repayment log lines specifically. Mock ERP's own routers already did this correctly
+(`request: Request` on every logging handler, `getattr(request.state,
+"correlation_id", None)` threaded into every `extra=`) — the integration-service fix
+matches that existing, already-working sibling-service convention rather than
+introducing a different mechanism.
+
+## Sync vs. async
+
+Every request in this system is synchronous end to end: a caller's `POST .../disburse`
+blocks until the full Fineract call *and* the ERP call have both resolved (or failed),
+and gets the real outcome back in that one response. No message broker, task queue, or
+background worker sits in the request path anywhere.
+
+This was a deliberate scope decision, not an oversight. The one place genuine
+asynchrony would help — "what if the ERP call is slow, should the caller really wait
+for it?" — is also exactly the place Part J already requires a durable, inspectable
+intermediate state (`FINERACT_DONE` → `ERP_PENDING`) regardless of whether the
+request path is sync or async. Introducing a queue here would mean building and
+operating a second piece of infrastructure (a broker, a worker process, its own
+failure modes) to solve a problem the state machine and the recovery sweep already
+solve without one — and the brief says as much directly: "recovery without a worker is
+acceptable." The one piece of this system that *is* asynchronous relative to the
+request path is the recovery sweep itself (`app/recovery.py`'s `run_recovery_sweep()`)
+— a periodic/startup catch-up for whatever a synchronous request didn't finish, not a
+redesign of the main flow into a queue. If this system needed to scale past a single
+instance handling its own recovery, or needed sub-second disbursement responses under
+real Fineract latency, a queue would become the right next step — not needed at this
+scope, and documented here as a known, deliberate boundary rather than discovered as a
+surprise.
+
+## What I chose not to build
+
+- **Overpayment and reversal GL postings** (Part H) — both are documented (where the
+  split comes from, how each *would* be handled) but not implemented; overpayment
+  needs a suspense/liability account this chart of accounts doesn't have, and a
+  reversal needs its own reversing entry mechanism. Demonstrating either is explicitly
+  optional per the brief.
+- **Reconciliation repair actions** (Part K) — the endpoint is deliberately read-only;
+  any future repair action the brief allows must be explicit and idempotent, and isn't
+  built here.
+- **Master-data (GL account) reconciliation** — explicitly a stretch item; Part K
+  covers transactions only.
+- **A real job queue or scheduler** for the recovery sweep — see "sync vs. async"
+  above. The admin endpoint plus the startup sweep are the entire mechanism.
+- **Full OAuth2/JWT** for the Integration Service's own API — a single shared API key
+  is sufficient for one known "financing partner" caller; see the Part E/F section
+  above for the full reasoning.
+- **Backpressure/rate-limit handling for a downstream that starts returning 429s** —
+  neither Fineract nor Mock ERP rate-limits in this system, so nothing exercises this
+  path today. If the ERP started returning 429s, the natural fix is the same shape as
+  the existing optimistic-lock retry in `FineractClient._request()` (a bounded retry
+  with backoff, scoped to that specific status/condition) — extending
+  `MockErpClient.create_journal_entry()` the same way, not a new mechanism.
+
+## Known weaknesses
+
+- The Fineract optimistic-lock retry (5 attempts, fixed linear backoff) and the
+  recovery grace period (`STALE_GRACE_PERIOD`, a flat 5 minutes) are both fixed
+  constants, not adaptive (no jitter, no exponential backoff, not configurable per
+  environment). Fine at this scale; a real production deployment would want these
+  tunable and probably jittered to avoid synchronized retry storms under real
+  concurrent load.
+- Part K's reconciliation iterates every `LoanMapping` row with no pagination or
+  batching. Correct and fast enough at this project's scale; would need to page
+  through loans at real scale rather than pulling every transaction list in one
+  request.
+- Fault injection (`app/fault_injection.py`) is in-process, in-memory state — it does
+  not survive a restart and only applies to the single instance it's armed against.
+  That's correct for this assessment's single-instance deployment and deliberately
+  simple (no external dependency), but would not work unmodified against multiple
+  replicas of the Integration Service.
+- Nothing alerts an operator if a row gets stuck at `NEEDS_RECONCILIATION`
+  indefinitely (e.g. the ERP stays down past every sweep's attempt window) — recovery
+  depends on *something* calling `POST /api/admin/recover` or reading a reconciliation
+  report periodically. There is no push notification, paging, or dashboard; this is
+  the honest gap between "the mechanism to recover exists" and "someone is guaranteed
+  to notice it's needed."
