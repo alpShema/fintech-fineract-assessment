@@ -4,6 +4,8 @@ This document records the trade-offs and rationale behind design choices made in
 assessment, per-part, as they're built. Assumptions made where the brief was ambiguous
 are also recorded here, with the reasoning for proceeding rather than blocking on them.
 
+
+
 ## Part A — ERP-owned GL accounts (Fineract Java customization)
 
 ### Customization mechanism: extend the existing GL account command handler
@@ -899,6 +901,43 @@ surprise.
   the existing optimistic-lock retry in `FineractClient._request()` (a bounded retry
   with backoff, scoped to that specific status/condition) — extending
   `MockErpClient.create_journal_entry()` the same way, not a new mechanism.
+
+### Optional infrastructure named in the brief — none of it was used, each justified
+
+- **Redis** — would earn its place as a cache (expensive repeated reads) or a
+  distributed lock (coordinating writers across multiple service instances). This
+  system has neither: every read is cheap (one row by indexed key), and the only
+  synchronization primitive actually needed is already provided by Postgres's own
+  unique constraints — the real enforcement behind Part I's concurrency guarantee
+  (see that section above). Adding Redis would mean operating a second stateful
+  service to duplicate a guarantee Postgres already gives for free.
+- **Celery (or similar) / a worker process** — see "Sync vs. async" above. The
+  recovery sweep (startup + `POST /api/admin/recover`) is a periodic catch-up for
+  whatever a synchronous request didn't finish, not a redesign of the main request
+  path into a queue. "Recovery without a worker is acceptable" per the brief is the
+  explicit endorsement of this choice, not just a fallback excuse for skipping one.
+- **Kafka / RabbitMQ** — a message broker earns its place when multiple independent
+  consumers need to react to the same event, or when producers and consumers must be
+  decoupled in time at scale. This system is a direct two-party bridge (one
+  Integration Service, two downstream systems it calls synchronously) — there is no
+  fan-out, no multiple consumers, and no case here where "the caller doesn't need to
+  know the result" is actually true (every write is intentionally request/response,
+  since the caller needs to know whether their money moved).
+- **OpenTelemetry** (distributed tracing) — `correlation_id`, threaded through every
+  structured log line and the response headers, is the same "find everything related
+  to this one request" capability distributed tracing provides, sized for how small
+  this system's call graph actually is (one service, two downstream HTTP calls deep,
+  never more). Full span-based tracing earns its cost at a much larger hop count,
+  where a flat correlation id stops being enough to reconstruct the request's shape.
+- **Prometheus / Grafana** (metrics + dashboards) — these answer aggregate/trend
+  questions ("how many disbursements failed in the last hour") that this
+  assessment's own observability requirement doesn't ask for; what it *does* ask for
+  — "what happened to this one specific transaction" — is answered by the structured
+  logs plus one API call (`GET /api/transactions/{external_reference}`), demonstrated
+  directly in the observability section above. Added here as a deliberate, named
+  omission rather than an oversight: a real production deployment handling enough
+  volume to need trend visibility would want this; this assessment's scope doesn't
+  exercise that need.
 
 ## Known weaknesses
 
