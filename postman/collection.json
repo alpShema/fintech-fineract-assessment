@@ -29,9 +29,78 @@
     { "key": "integrationServiceBaseUrl", "value": "http://localhost:8002" },
     { "key": "integrationServiceApiKey", "value": "integration-service-partner-key" },
     { "key": "intSvcClientUid", "value": "SME-INTSVC-001" },
-    { "key": "intSvcLoanReference", "value": "LN-INTSVC-001" }
+    { "key": "intSvcLoanReference", "value": "LN-INTSVC-001" },
+    { "key": "runSuffix", "value": "" },
+    { "key": "todayDate", "value": "" },
+    { "key": "todayDateLong", "value": "" },
+    { "key": "glCodeSuffix", "value": "" },
+    { "key": "mockErpDemoAccountCode", "value": "" },
+    { "key": "mockErpDemoAccountRef", "value": "" },
+    { "key": "intSvcClientRef", "value": "" },
+    { "key": "intSvcLoanAppRef", "value": "" },
+    { "key": "intSvcDisbRef", "value": "" },
+    { "key": "intSvcDisbRetryRef", "value": "" },
+    { "key": "intSvcRepayRef", "value": "" }
   ],
   "item": [
+    {
+      "name": "0. Setup",
+      "description": "Run the one request in here FIRST, every time you start a fresh test pass -- especially after `docker compose down` + `up` without `-v` (the Postgres volume survives a plain `down`, so old clients/loans/GL accounts/journal entries from a previous run are still there and will collide on a duplicate external_reference/client_uid/glCode/account code if you reuse the same values). It regenerates every identifier and date this whole collection uses, so nothing below needs manual editing.",
+      "item": [
+        {
+          "name": "Generate Fresh Test Data (RUN THIS FIRST)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "const suffix = Date.now().toString();",
+                  "const today = new Date();",
+                  "const todayIso = today.toISOString().slice(0, 10);",
+                  "const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];",
+                  "const todayLong = String(today.getUTCDate()).padStart(2, '0') + ' ' + months[today.getUTCMonth()] + ' ' + today.getUTCFullYear();",
+                  "",
+                  "pm.collectionVariables.set('runSuffix', suffix);",
+                  "pm.collectionVariables.set('todayDate', todayIso);",
+                  "pm.collectionVariables.set('todayDateLong', todayLong);",
+                  "",
+                  "// Part A",
+                  "pm.collectionVariables.set('glExternalRef', 'GL-TEST-' + suffix);",
+                  "pm.collectionVariables.set('glCodeSuffix', suffix);",
+                  "",
+                  "// Part C+D",
+                  "pm.collectionVariables.set('clientUid', 'SME-POSTMAN-' + suffix);",
+                  "pm.collectionVariables.set('loanReference', 'LN-POSTMAN-' + suffix);",
+                  "pm.collectionVariables.set('clientId', '');",
+                  "pm.collectionVariables.set('loanId', '');",
+                  "",
+                  "// Part G",
+                  "pm.collectionVariables.set('txnExternalRef', 'TXN-POSTMAN-' + suffix);",
+                  "pm.collectionVariables.set('mockErpDemoAccountCode', 'DEMO' + suffix.slice(-6));",
+                  "pm.collectionVariables.set('mockErpDemoAccountRef', 'GL-DEMO-' + suffix);",
+                  "",
+                  "// Part E+F / Tier 2",
+                  "pm.collectionVariables.set('intSvcClientUid', 'SME-INTSVC-' + suffix);",
+                  "pm.collectionVariables.set('intSvcLoanReference', 'LN-INTSVC-' + suffix);",
+                  "pm.collectionVariables.set('intSvcClientRef', 'REF-INTSVC-CLIENT-' + suffix);",
+                  "pm.collectionVariables.set('intSvcLoanAppRef', 'REF-INTSVC-LOAN-' + suffix);",
+                  "pm.collectionVariables.set('intSvcDisbRef', 'REF-INTSVC-DISB-' + suffix);",
+                  "pm.collectionVariables.set('intSvcDisbRetryRef', 'REF-INTSVC-DISB-' + suffix + '-RETRY');",
+                  "pm.collectionVariables.set('intSvcRepayRef', 'REF-INTSVC-REPAY-' + suffix);",
+                  "",
+                  "console.log('Fresh test data generated -- suffix=' + suffix + ', todayDate=' + todayIso);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/actuator/health", "host": ["{{baseUrl}}"], "path": ["actuator", "health"] },
+            "auth": { "type": "noauth" }
+          }
+        }
+      ]
+    },
     {
       "name": "Actuator",
       "item": [
@@ -125,7 +194,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Loan Receivable\",\n  \"glCode\": \"1200-TEST\",\n  \"type\": 1,\n  \"usage\": 1,\n  \"manualEntriesAllowed\": true,\n  \"externalReference\": \"{{glExternalRef}}\"\n}"
+              "raw": "{\n  \"name\": \"Loan Receivable\",\n  \"glCode\": \"1200-TEST-{{glCodeSuffix}}\",\n  \"type\": 1,\n  \"usage\": 1,\n  \"manualEntriesAllowed\": true,\n  \"externalReference\": \"{{glExternalRef}}\"\n}"
             }
           }
         },
@@ -144,7 +213,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Loan Receivable\",\n  \"glCode\": \"1200-TEST\",\n  \"type\": 1,\n  \"usage\": 1,\n  \"manualEntriesAllowed\": true,\n  \"externalReference\": \"{{glExternalRef}}\"\n}"
+              "raw": "{\n  \"name\": \"Loan Receivable\",\n  \"glCode\": \"1200-TEST-{{glCodeSuffix}}\",\n  \"type\": 1,\n  \"usage\": 1,\n  \"manualEntriesAllowed\": true,\n  \"externalReference\": \"{{glExternalRef}}\"\n}"
             }
           }
         },
@@ -163,7 +232,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Loan Receivable CHANGED\",\n  \"glCode\": \"1200-TEST-CONFLICT\",\n  \"type\": 1,\n  \"usage\": 1,\n  \"manualEntriesAllowed\": true,\n  \"externalReference\": \"{{glExternalRef}}\"\n}"
+              "raw": "{\n  \"name\": \"Loan Receivable CHANGED\",\n  \"glCode\": \"1200-TEST-{{glCodeSuffix}}-CONFLICT\",\n  \"type\": 1,\n  \"usage\": 1,\n  \"manualEntriesAllowed\": true,\n  \"externalReference\": \"{{glExternalRef}}\"\n}"
             }
           }
         }
@@ -496,7 +565,7 @@
             "url": { "raw": "{{mockErpBaseUrl}}/api/accounts", "host": ["{{mockErpBaseUrl}}"], "path": ["api", "accounts"] },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"code\": \"5000\",\n  \"name\": \"Loan Losses Written Off\",\n  \"type\": \"EXPENSE\",\n  \"currency\": \"RWF\",\n  \"external_reference\": \"GL-5000-DEMO\"\n}"
+              "raw": "{\n  \"code\": \"{{mockErpDemoAccountCode}}\",\n  \"name\": \"Loan Losses Written Off\",\n  \"type\": \"EXPENSE\",\n  \"currency\": \"RWF\",\n  \"external_reference\": \"{{mockErpDemoAccountRef}}\"\n}"
             }
           }
         },
@@ -508,7 +577,7 @@
             "url": { "raw": "{{mockErpBaseUrl}}/api/accounts", "host": ["{{mockErpBaseUrl}}"], "path": ["api", "accounts"] },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"code\": \"5000\",\n  \"name\": \"Loan Losses Written Off\",\n  \"type\": \"EXPENSE\",\n  \"currency\": \"RWF\",\n  \"external_reference\": \"GL-5000-DEMO\"\n}"
+              "raw": "{\n  \"code\": \"{{mockErpDemoAccountCode}}\",\n  \"name\": \"Loan Losses Written Off\",\n  \"type\": \"EXPENSE\",\n  \"currency\": \"RWF\",\n  \"external_reference\": \"{{mockErpDemoAccountRef}}\"\n}"
             }
           }
         },
@@ -520,7 +589,7 @@
             "url": { "raw": "{{mockErpBaseUrl}}/api/accounts", "host": ["{{mockErpBaseUrl}}"], "path": ["api", "accounts"] },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"code\": \"5000-X\",\n  \"name\": \"Renamed\",\n  \"type\": \"EXPENSE\",\n  \"currency\": \"RWF\",\n  \"external_reference\": \"GL-5000-DEMO\"\n}"
+              "raw": "{\n  \"code\": \"{{mockErpDemoAccountCode}}-X\",\n  \"name\": \"Renamed\",\n  \"type\": \"EXPENSE\",\n  \"currency\": \"RWF\",\n  \"external_reference\": \"{{mockErpDemoAccountRef}}\"\n}"
             }
           }
         },
@@ -666,7 +735,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"external_reference\": \"REF-INTSVC-CLIENT-1\",\n  \"client_uid\": \"{{intSvcClientUid}}\",\n  \"firstname\": \"Jean\",\n  \"lastname\": \"Mugisha\"\n}"
+              "raw": "{\n  \"external_reference\": \"{{intSvcClientRef}}\",\n  \"client_uid\": \"{{intSvcClientUid}}\",\n  \"firstname\": \"Jean\",\n  \"lastname\": \"Mugisha\"\n}"
             }
           }
         },
@@ -682,7 +751,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"external_reference\": \"REF-INTSVC-CLIENT-1\",\n  \"client_uid\": \"{{intSvcClientUid}}\",\n  \"firstname\": \"Jean\",\n  \"lastname\": \"Mugisha\"\n}"
+              "raw": "{\n  \"external_reference\": \"{{intSvcClientRef}}\",\n  \"client_uid\": \"{{intSvcClientUid}}\",\n  \"firstname\": \"Jean\",\n  \"lastname\": \"Mugisha\"\n}"
             }
           }
         },
@@ -705,7 +774,7 @@
             "url": { "raw": "{{integrationServiceBaseUrl}}/api/loans", "host": ["{{integrationServiceBaseUrl}}"], "path": ["api", "loans"] },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"external_reference\": \"REF-INTSVC-LOAN-1\",\n  \"client_uid\": \"{{intSvcClientUid}}\",\n  \"loan_reference\": \"{{intSvcLoanReference}}\",\n  \"principal\": \"1000000\",\n  \"expected_disbursement_date\": \"2026-10-08\"\n}"
+              "raw": "{\n  \"external_reference\": \"{{intSvcLoanAppRef}}\",\n  \"client_uid\": \"{{intSvcClientUid}}\",\n  \"loan_reference\": \"{{intSvcLoanReference}}\",\n  \"principal\": \"1000000\",\n  \"expected_disbursement_date\": \"{{todayDate}}\"\n}"
             }
           }
         },
@@ -732,7 +801,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"external_reference\": \"REF-INTSVC-DISB-1\",\n  \"actual_disbursement_date\": \"2026-10-08\"\n}"
+              "raw": "{\n  \"external_reference\": \"{{intSvcDisbRef}}\",\n  \"actual_disbursement_date\": \"{{todayDate}}\"\n}"
             }
           }
         },
@@ -748,7 +817,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"external_reference\": \"REF-INTSVC-DISB-1-RETRY\",\n  \"actual_disbursement_date\": \"2026-10-08\"\n}"
+              "raw": "{\n  \"external_reference\": \"{{intSvcDisbRetryRef}}\",\n  \"actual_disbursement_date\": \"{{todayDate}}\"\n}"
             }
           }
         },
@@ -764,7 +833,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"external_reference\": \"REF-INTSVC-REPAY-1\",\n  \"transaction_date\": \"2026-10-08\",\n  \"transaction_amount\": \"100000\"\n}"
+              "raw": "{\n  \"external_reference\": \"{{intSvcRepayRef}}\",\n  \"transaction_date\": \"{{todayDate}}\",\n  \"transaction_amount\": \"100000\"\n}"
             }
           }
         },
@@ -784,9 +853,9 @@
           "request": {
             "method": "GET",
             "url": {
-              "raw": "{{integrationServiceBaseUrl}}/api/transactions/REF-INTSVC-LOAN-1",
+              "raw": "{{integrationServiceBaseUrl}}/api/transactions/{{intSvcLoanAppRef}}",
               "host": ["{{integrationServiceBaseUrl}}"],
-              "path": ["api", "transactions", "REF-INTSVC-LOAN-1"]
+              "path": ["api", "transactions", "{{intSvcLoanAppRef}}"]
             }
           }
         },
@@ -910,7 +979,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"date_from\": \"2026-01-01\",\n  \"date_to\": \"2026-12-31\"\n}"
+              "raw": "{\n  \"date_from\": \"{{todayDate}}\",\n  \"date_to\": \"{{todayDate}}\"\n}"
             }
           }
         },
@@ -926,7 +995,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"external_references\": [\"REF-INTSVC-LOAN-1\", \"REF-INTSVC-DISB-1\"]\n}"
+              "raw": "{\n  \"external_references\": [\"{{intSvcLoanAppRef}}\", \"{{intSvcDisbRef}}\"]\n}"
             }
           }
         }

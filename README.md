@@ -9,7 +9,8 @@ For the deeper documents: **[ARCHITECTURE.md](ARCHITECTURE.md)** (components, da
 flow, data model, state machine), **[API.md](API.md)** (endpoints, examples, errors,
 the idempotency contract), **[SIMULATIONS.md](SIMULATIONS.md)** (every scripted
 simulation with before/after state), **[DECISIONS.md](DECISIONS.md)** (trade-offs,
-rationale, what wasn't built, known weaknesses).
+rationale, what wasn't built, known weaknesses, and an AI-assistance disclosure per
+the brief's ground rules).
 
 ## Quick start
 
@@ -83,6 +84,21 @@ Both Python services use type hints checked by mypy (`--strict`) and linted by r
 Java's Part A customization has its own JUnit unit + integration tests
 (`fineract-customization/`, evidence in `evidence/fineract-java-tests.log` and
 `evidence/fineract-integration-test.log`).
+
+The brief's remaining testing levels are covered, not skipped, just not under a
+separate `tests/` directory of their own:
+
+- **Integration** (Integration Service ↔ customized Fineract; Integration Service ↔
+  Mock ERP) — the `make simulate-*` scripts below run against the real, running
+  Docker stack (real Fineract, real Mock ERP, real Postgres), not mocks. That *is*
+  this level of testing, not a stand-in for it.
+- **Failure** (Fineract unavailable, ERP unavailable, timeouts, duplicate request) —
+  covered at the unit level (respx-mocked `ConnectError`/`TimeoutException`/409s in
+  `integration-service/tests/`) and at the integration level live (`make
+  simulate-failures`, Part J's 5 scenarios, fault-injected against the real stack).
+- **Concurrency** (parallel same-loan disbursements and repayments) — `make
+  test-concurrency` / `make simulate-duplicates`, real parallel HTTP requests via
+  Python's `ThreadPoolExecutor` against the live stack (Part I).
 
 ## Running the simulations
 

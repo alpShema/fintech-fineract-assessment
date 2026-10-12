@@ -1,0 +1,12 @@
+# This repo targets Linux containers (Docker) from a Windows dev machine with
+# core.autocrlf=true. Without this file, git silently converts these files to
+# CRLF on checkout -- which breaks `git apply` against a freshly-cloned LF
+# source tree (fineract.patch) and breaks the shebang line on scripts executed
+# directly inside a container (Postgres's docker-entrypoint-initdb.d scripts).
+# Force LF regardless of any individual clone's autocrlf setting.
+*.sh text eol=lf
+*.patch text eol=lf
+*.diff text eol=lf
+Dockerfile text eol=lf
+*.sql text eol=lf
+Makefile text eol=lf
