@@ -4,7 +4,13 @@ This document records the trade-offs and rationale behind design choices made in
 assessment, per-part, as they're built. Assumptions made where the brief was ambiguous
 are also recorded here, with the reasoning for proceeding rather than blocking on them.
 
+## AI Assistance Disclosure
 
+Claude Code (Anthropic) was used as an AI-assisted development and learning tool throughout implementation, testing, and documentation. Since this was my first time working with Apache Fineract and ERP-related concepts, I used it not only to support development but also to deepen my understanding of the underlying architecture, business logic, and implementation approaches.
+
+I used it to explore technical concepts, evaluate alternative solutions, and reason through design decisions, including the idempotency model, recovery state machine, and general ledger (GL) account mapping rules. I reviewed and refined implementation approaches as my understanding developed, documenting relevant decisions and trade-offs where appropriate.
+
+I take responsibility for understanding the final implementation and am prepared to explain the key design decisions, discuss the trade-offs, troubleshoot issues, and make further modifications. The AI assistance supported my learning and development process; it did not replace the need to understand the system and its behavior.
 
 ## Part A — ERP-owned GL accounts (Fineract Java customization)
 
